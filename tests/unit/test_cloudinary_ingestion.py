@@ -1,8 +1,10 @@
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
-from app.clients import cloudinary_storage as storage_module
+import app.clients.cloudinary_storage as storage_module
+from app.repositories.supabase_repo import SupabaseRepo
 from app.services import ingestion as ingestion_module
 
 
@@ -63,8 +65,8 @@ async def test_process_ingest_job_uploads_before_extracting(monkeypatch: pytest.
     monkeypatch.setattr(ingestion_module, "clean_text", fake_clean_text)
     monkeypatch.setattr(ingestion_module, "sliding_window_chunks", fake_sliding_window_chunks)
 
-    repo = FakeRepo()
-    chunks_created, storage_metadata = await ingestion_module.process_ingest_job(
+    repo = cast(SupabaseRepo, FakeRepo())
+    ingest_result = await ingestion_module.process_ingest_job(
         document_id="doc-123",
         user_id="user-1",
         file_data=b"%PDF-1.4",
@@ -74,9 +76,9 @@ async def test_process_ingest_job_uploads_before_extracting(monkeypatch: pytest.
         metadata={"source": "upload"},
     )
 
-    assert chunks_created == 2
-    assert storage_metadata["provider"] == "cloudinary"
-    assert storage_metadata["public_id"] == "documents/user-1/doc-123"
+    assert ingest_result.chunks_created == 2
+    assert ingest_result.storage_metadata["provider"] == "cloudinary"
+    assert ingest_result.storage_metadata["public_id"] == "documents/user-1/doc-123"
     assert calls[0] == "upload"
     assert calls.index("upload") < calls.index("extract")
     assert repo.saved_chunks is not None
@@ -128,4 +130,7 @@ async def test_cloudinary_storage_client_normalizes_and_deletes(monkeypatch: pyt
     deleted = await client.delete_document_asset({"storage": upload_result})
     assert deleted is True
     assert calls[-1][0] == "destroy"
+
+
+
 
