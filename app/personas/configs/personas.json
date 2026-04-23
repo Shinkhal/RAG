@@ -1,0 +1,11 @@
+{
+  "default_persona_id": "einstein",
+  "personas": [
+    "einstein",
+    "newton",
+    "ronaldo",
+    "salman_khan",
+    "jacke_shroff",
+    "shah_rukh_khan"
+  ]
+}
