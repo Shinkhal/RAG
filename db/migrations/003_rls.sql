@@ -1,0 +1,2 @@
+-- Row-level security policies can be enabled manually in Postgres.
+-- This file is intentionally not auto-applied on startup yet.
