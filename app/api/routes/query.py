@@ -39,6 +39,7 @@ async def query_rag(
     chunks_with_scores = await retrieve_chunks(
         query=request.query,
         user_id=request.user_id,
+        session_id=request.session_id,
         repo=repo,
         top_k=top_k,
         min_score=min_score,
@@ -121,6 +122,7 @@ async def query_rag_stream(
     chunks_with_scores = await retrieve_chunks(
         query=request.query,
         user_id=request.user_id,
+        session_id=request.session_id,
         repo=repo,
         top_k=top_k,
         min_score=min_score,

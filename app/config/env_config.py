@@ -241,6 +241,10 @@ class EnvSettings:
         return optional("OPENAI_API_KEY")
 
     @property
+    def voyage_api_key(self) -> str:
+        return optional("VOYAGE_API_KEY")
+
+    @property
     def openai_base_url(self) -> str:
         return optional("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
@@ -306,19 +310,19 @@ class EnvSettings:
 
     @property
     def max_chunk_size(self) -> int:
-        return number("MAX_CHUNK_SIZE", 512)
+        return number("MAX_CHUNK_SIZE", 300)
 
     @property
     def chunk_overlap(self) -> int:
-        return number("CHUNK_OVERLAP", 64)
+        return number("CHUNK_OVERLAP", 50)
 
     @property
     def embedding_batch_size(self) -> int:
-        return number("EMBEDDING_BATCH_SIZE", 32)
+        return number("EMBEDDING_BATCH_SIZE", 100)
 
     @property
     def embedding_model(self) -> str:
-        return optional("EMBEDDING_MODEL", "gemini-embedding-001")
+        return optional("EMBEDDING_MODEL", "gemini-embedding-2")
 
     @property
     def embedding_output_dimensionality(self) -> int:
@@ -326,11 +330,11 @@ class EnvSettings:
 
     @property
     def default_top_k(self) -> int:
-        return number("DEFAULT_TOP_K", 5)
+        return number("DEFAULT_TOP_K", 10)
 
     @property
     def min_retrieval_score(self) -> float:
-        raw = optional("MIN_RETRIEVAL_SCORE", "0.7")
+        raw = optional("MIN_RETRIEVAL_SCORE", "0.5")
         return float(raw)
 
     @property

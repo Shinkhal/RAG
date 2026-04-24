@@ -16,6 +16,7 @@ class IngestProcessingResult:
 
 async def process_ingest_job(
     document_id: str,
+    session_id: str,
     user_id: str,
     file_data: bytes,
     filename: str,
@@ -48,6 +49,7 @@ async def process_ingest_job(
         for idx, (chunk_text, embedding) in enumerate(zip(chunks, all_embeddings)):
             record = ChunkRecord(
                 document_id=document_id,
+                session_id=session_id,
                 user_id=user_id,
                 chunk_idx=idx,
                 content=chunk_text,

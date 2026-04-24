@@ -4,13 +4,14 @@ from typing import Any
 from sqlalchemy import select, text, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Chunk, Document, IngestJob, Persona, QueryLog
+from app.db.models import Chunk, Document, IngestJob, Persona, QueryLog, ChatSession
 
 
 class ChunkRecord:
     def __init__(
         self,
         document_id: str,
+        session_id: str,
         user_id: str,
         chunk_idx: int,
         content: str,
@@ -18,6 +19,7 @@ class ChunkRecord:
         metadata: dict[str, Any] | None = None,
     ):
         self.document_id = document_id
+        self.session_id = session_id
         self.user_id = user_id
         self.chunk_idx = chunk_idx
         self.content = content
@@ -43,6 +45,7 @@ class SupabaseRepo:
         for chunk in chunks:
             db_chunk = Chunk(
                 document_id=chunk.document_id,
+                session_id=chunk.session_id,
                 user_id=chunk.user_id,
                 chunk_idx=chunk.chunk_idx,
                 content=chunk.content,
@@ -57,6 +60,7 @@ class SupabaseRepo:
         self,
         embedding: list[float],
         user_id: str,
+        session_id: str,
         top_k: int = 20,
         min_score: float = 0.7,
         document_ids: list[str] | None = None,
@@ -67,6 +71,7 @@ class SupabaseRepo:
             SELECT c.*, 1 - (c.embedding <=> CAST(:embedding AS vector)) as score
             FROM chunks c
             WHERE c.user_id = :user_id
+            AND c.session_id = :session_id
             AND 1 - (c.embedding <=> CAST(:embedding AS vector)) >= :min_score
             ORDER BY c.embedding <=> CAST(:embedding AS vector)
             LIMIT :limit
@@ -75,6 +80,7 @@ class SupabaseRepo:
         params = {
             "embedding": embedding_str,
             "user_id": user_id,
+            "session_id": session_id,
             "min_score": min_score,
             "limit": top_k,
         }
@@ -85,6 +91,7 @@ class SupabaseRepo:
                 SELECT c.*, 1 - (c.embedding <=> CAST(:embedding AS vector)) as score
                 FROM chunks c
                 WHERE c.user_id = :user_id
+                AND c.session_id = :session_id
                 AND c.document_id IN ({doc_list})
                 AND 1 - (c.embedding <=> CAST(:embedding AS vector)) >= :min_score
                 ORDER BY c.embedding <=> CAST(:embedding AS vector)
@@ -209,3 +216,31 @@ class SupabaseRepo:
         result = await self.session.execute(stmt)
         await self.session.commit()
         return result.rowcount > 0
+
+    async def create_session(self, session: ChatSession) -> ChatSession:
+        self.session.add(session)
+        await self.session.commit()
+        await self.session.refresh(session)
+        return session
+
+    async def get_session(self, session_id: str, user_id: str) -> ChatSession | None:
+        stmt = select(ChatSession).where(
+            ChatSession.id == session_id,
+            ChatSession.user_id == user_id
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def delete_session(self, session_id: str, user_id: str) -> bool:
+        stmt = delete(ChatSession).where(
+            ChatSession.id == session_id,
+            ChatSession.user_id == user_id
+        )
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return result.rowcount > 0
+
+    async def list_sessions(self, user_id: str) -> list[ChatSession]:
+        stmt = select(ChatSession).where(ChatSession.user_id == user_id).order_by(ChatSession.created_at.desc())
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())

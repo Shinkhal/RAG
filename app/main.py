@@ -1,8 +1,9 @@
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from starlette.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.api.router import api_router
 from app.config.env_config import get_settings, get_env
 from app.db import init_db
@@ -12,6 +13,7 @@ from app.config.redis_config import RedisConnection
 from app.config.cloudinary_config import CloudinaryConfig
 import time
 from app.core.middleware import RequestLoggingMiddleware
+from app.middleware.rate_limit import RateLimitMiddleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -45,6 +47,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
 
     yield
+    await redis_client.disconnect()
+    # TODO: add Cloudinary shutdown if needed
 
 
 app = FastAPI(
@@ -60,9 +64,17 @@ app = FastAPI(
             allow_methods=["*"],
             allow_headers=["*"],
         ),
-        Middleware(RequestLoggingMiddleware),
+        Middleware(
+        RateLimitMiddleware,
+    ),
+    Middleware(RequestLoggingMiddleware),
     ],
 )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception: %s", exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 app.include_router(api_router, prefix="/api/v1")
 
@@ -87,6 +99,7 @@ async def health_check() -> dict[str, Any]:
         "database": "ready" if db_ready else "not_ready",
         "cloudinary": "healthy" if cloudinary_healthy else "not_healthy",
         "redis": "connected" if redis_healthy else "not_connected",
+        "latency_ms": int((time.time() - getattr(app.state, "start_time", time.time())) * 1000),
         "env": get_env().app.env(),
     }
 

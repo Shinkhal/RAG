@@ -20,6 +20,7 @@ class PersonaConfig(BaseModel):
 class QueryRequest(BaseModel):
     query: str
     user_id: str
+    session_id: str
     persona: PersonaConfig | None = None
     subscription_tier: str = "free"
     filters: dict[str, Any] | None = None

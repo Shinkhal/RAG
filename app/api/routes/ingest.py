@@ -20,6 +20,7 @@ router = APIRouter()
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest_document(
     user_id: str = Form(...),
+    session_id: str = Form(...),
     file: UploadFile = File(...),
     metadata: dict | None = None,
     session: AsyncSession = Depends(get_session),
@@ -79,6 +80,7 @@ async def ingest_document(
     doc = Document(
         id=document_id,
         user_id=user_id,
+        session_id=session_id,
         status="queued",
         metadata_=metadata or {},
     )
@@ -87,6 +89,7 @@ async def ingest_document(
     job = IngestJob(
         job_id=job_id,
         document_id=document_id,
+        session_id=session_id,
         user_id=user_id,
         status="queued",
     )
@@ -95,6 +98,7 @@ async def ingest_document(
     try:
         ingest_result = cast(object, await process_ingest_job(
             document_id=document_id,
+            session_id=session_id,
             user_id=user_id,
             file_data=file_data,
             filename=file.filename or "document.pdf",

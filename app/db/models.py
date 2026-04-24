@@ -14,6 +14,27 @@ except ImportError:  # pragma: no cover - optional in lean test/runtime images
 
 from .database import Base
 
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    title: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    documents: Mapped[list["Document"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_chat_sessions_user_created", "user_id", "created_at"),
+    )
+
+
 EMBEDDING_DIMENSION = get_settings().embedding_output_dimensionality
 
 
@@ -22,6 +43,7 @@ class Document(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(String, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(
         String,
         nullable=False,
@@ -37,6 +59,7 @@ class Document(Base):
 
     chunks: Mapped[list["Chunk"]] = relationship(back_populates="document", cascade="all, delete-orphan")
     jobs: Mapped[list["IngestJob"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+    session: Mapped["ChatSession"] = relationship(back_populates="documents")
 
 
 class Chunk(Base):
@@ -44,6 +67,7 @@ class Chunk(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     document_id: Mapped[str] = mapped_column(String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    session_id: Mapped[str] = mapped_column(String, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id: Mapped[str] = mapped_column(String, nullable=False)
     chunk_idx: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -58,6 +82,7 @@ class Chunk(Base):
     __table_args__ = (
         Index("ix_chunks_user_id", "user_id"),
         Index("ix_chunks_document_id", "document_id"),
+        Index("ix_chunks_session_id", "session_id"),
     )
 
 
@@ -66,6 +91,7 @@ class IngestJob(Base):
 
     job_id: Mapped[str] = mapped_column(String, primary_key=True)
     document_id: Mapped[str] = mapped_column(String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    session_id: Mapped[str] = mapped_column(String, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, default="queued")
     chunks_created: Mapped[int] = mapped_column(Integer, default=0)

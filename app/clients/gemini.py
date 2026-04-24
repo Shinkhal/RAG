@@ -1,7 +1,8 @@
 import math
+import asyncio
 from typing import Any, AsyncIterator
 from google import genai
-from google.genai import types
+from google.genai import types, errors
 
 from app.config.env_config import get_settings
 
@@ -39,7 +40,7 @@ class GeminiClient:
         return [value / norm for value in values]
 
     def _normalize_if_needed(self, values: list[float]) -> list[float]:
-        if self._embedding_model == "gemini-embedding-001" and self._embedding_output_dimensionality != 3072:
+        if self._embedding_model == "gemini-embedding-2" and self._embedding_output_dimensionality != 3072:
             return self._l2_normalize(values)
         return values
 
@@ -47,31 +48,52 @@ class GeminiClient:
         embeddings = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
-            result = await self.client.aio.models.embed_content(
-                model=self._embedding_model,
-                contents=batch,
-                config=types.EmbedContentConfig(
-                    task_type="RETRIEVAL_DOCUMENT",
-                    output_dimensionality=self._embedding_output_dimensionality,
-                ),
-            )
-            embeddings.extend(
-                [
-                    self._normalize_if_needed(e.values)
-                    for e in result.embeddings
-                ]
-            )
+            result = None
+            for attempt in range(5):
+                try:
+                    result = await self.client.aio.models.embed_content(
+                        model=self._embedding_model,
+                        contents=batch,
+                        config=types.EmbedContentConfig(
+                            task_type="RETRIEVAL_DOCUMENT",
+                            output_dimensionality=self._embedding_output_dimensionality,
+                        ),
+                    )
+                    break
+                except errors.APIError as e:
+                    if e.code == 429 and attempt < 4:
+                        await asyncio.sleep(10.0)
+                    else:
+                        raise
+            
+            if result:
+                embeddings.extend(
+                    [
+                        self._normalize_if_needed(e.values)
+                        for e in result.embeddings
+                    ]
+                )
         return embeddings
 
     async def embed_query(self, query: str) -> list[float]:
-        result = await self.client.aio.models.embed_content(
-            model=self._embedding_model,
-            contents=query,
-            config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_QUERY",
-                output_dimensionality=self._embedding_output_dimensionality,
-            ),
-        )
+        result = None
+        for attempt in range(5):
+            try:
+                result = await self.client.aio.models.embed_content(
+                    model=self._embedding_model,
+                    contents=query,
+                    config=types.EmbedContentConfig(
+                        task_type="RETRIEVAL_QUERY",
+                        output_dimensionality=self._embedding_output_dimensionality,
+                    ),
+                )
+                break
+            except errors.APIError as e:
+                if e.code == 429 and attempt < 4:
+                    await asyncio.sleep(10.0)
+                else:
+                    raise
+        
         return self._normalize_if_needed(result.embeddings[0].values)
 
     async def generate(
@@ -129,7 +151,7 @@ class GeminiClient:
 
         system_prompt = """You are a helpful assistant that answers questions based only on the provided context.
 Cite sources using [document_name page X] format.
-If the context doesn't contain enough information, say so clearly.
+If the answer is likely present but not explicit, infer cautiously.
 Do not make up information."""
 
         if persona_config:
