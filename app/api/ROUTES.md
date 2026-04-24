@@ -38,3 +38,22 @@
 
 **`DELETE /rag/documents/{doc_id}`**
 - Delete single document + all chunks
+
+---
+
+## Persona Routes (`app/api/routes/persona.py`)
+
+**`GET /rag/personas`**
+- List all active personas available for users to select
+
+**`GET /rag/personas/{persona_id}`**
+- Get one active persona
+
+**`POST /rag/admin/personas`**
+- Admin-only persona creation (`x-admin-token` header required)
+
+**`PUT /rag/admin/personas/{persona_id}`**
+- Admin-only persona update (`x-admin-token` header required)
+
+**`DELETE /rag/admin/personas/{persona_id}`**
+- Admin-only persona delete (`x-admin-token` header required)
