@@ -3,15 +3,48 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.clients.cloudinary_storage import cloudinary_storage_client
-from app.repositories.supabase_repo import SupabaseRepo, ChunkRecord
-from app.services.chunking import sliding_window_chunks, batched, extract_text, clean_text
 from app.clients.gemini import gemini_client
+from app.repositories.supabase_repo import ChunkRecord, SupabaseRepo
+from app.services.chunking import (
+    ExtractedPage,
+    batched,
+    clean_text,
+    extract_pages_from_pdf,
+    extract_text,
+    sliding_window_chunks,
+)
 
 
 @dataclass(slots=True)
 class IngestProcessingResult:
     chunks_created: int
     storage_metadata: dict[str, Any]
+
+
+def _chunk_pages(
+    pages: list[ExtractedPage], chunk_size: int | None, overlap: int | None
+) -> list[tuple[int, str]]:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+    from app.config.env_config import get_settings
+
+    settings = get_settings()
+    chunk_size = chunk_size or settings.max_chunk_size
+    overlap = overlap or settings.chunk_overlap
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=overlap,
+        separators=["\n\n", "\n", ". ", " ", ""],
+    )
+
+    all_chunks: list[tuple[int, str]] = []
+    for page in pages:
+        page_chunks = splitter.split_text(page.text)
+        for chunk_text in page_chunks:
+            all_chunks.append((page.page_num, chunk_text))
+
+    return all_chunks
 
 
 async def process_ingest_job(
@@ -35,32 +68,68 @@ async def process_ingest_job(
     )
 
     try:
-        text = extract_text(file_data, content_type=content_type, filename=filename)
-        text = clean_text(text)
+        if content_type == "application/pdf" or (
+            filename and filename.rsplit(".", 1)[-1].lower() == "pdf"
+        ):
+            pages = extract_pages_from_pdf(file_data)
+            page_chunked = _chunk_pages(pages, chunk_size=None, overlap=None)
+            total_chunks = len(page_chunked)
 
-        chunks = sliding_window_chunks(text)
+            all_embeddings = []
+            texts = [c[1] for c in page_chunked]
+            for batch_texts in batched(texts):
+                embeddings = await gemini_client.embed_documents(batch_texts)
+                all_embeddings.extend(embeddings)
 
-        all_embeddings = []
-        for batch in batched(chunks):
-            embeddings = await gemini_client.embed_documents(batch)
-            all_embeddings.extend(embeddings)
+            chunk_records = []
+            for idx, ((page_num, chunk_text), embedding) in enumerate(
+                zip(page_chunked, all_embeddings)
+            ):
+                record = ChunkRecord(
+                    document_id=document_id,
+                    session_id=session_id,
+                    user_id=user_id,
+                    chunk_idx=idx,
+                    content=chunk_text,
+                    embedding=embedding,
+                    metadata={
+                        "filename": filename,
+                        "total_chunks": total_chunks,
+                        "chunk_id": idx,
+                        "page": page_num,
+                        **metadata,
+                    },
+                )
+                chunk_records.append(record)
+        else:
+            raw_text = extract_text(file_data, content_type=content_type, filename=filename)
+            text = clean_text(raw_text)
+            chunks = sliding_window_chunks(text)
+            total_chunks = len(chunks)
 
-        chunk_records = []
-        for idx, (chunk_text, embedding) in enumerate(zip(chunks, all_embeddings)):
-            record = ChunkRecord(
-                document_id=document_id,
-                session_id=session_id,
-                user_id=user_id,
-                chunk_idx=idx,
-                content=chunk_text,
-                embedding=embedding,
-                metadata={
-                    "filename": filename,
-                    "total_chunks": len(chunks),
-                    **metadata,
-                },
-            )
-            chunk_records.append(record)
+            all_embeddings = []
+            for batch in batched(chunks):
+                embeddings = await gemini_client.embed_documents(batch)
+                all_embeddings.extend(embeddings)
+
+            chunk_records = []
+            for idx, (chunk_text, embedding) in enumerate(zip(chunks, all_embeddings)):
+                record = ChunkRecord(
+                    document_id=document_id,
+                    session_id=session_id,
+                    user_id=user_id,
+                    chunk_idx=idx,
+                    content=chunk_text,
+                    embedding=embedding,
+                    metadata={
+                        "filename": filename,
+                        "total_chunks": total_chunks,
+                        "chunk_id": idx,
+                        "page": None,
+                        **metadata,
+                    },
+                )
+                chunk_records.append(record)
 
         await repo.upsert_chunks(chunk_records)
     except Exception:
@@ -68,4 +137,6 @@ async def process_ingest_job(
             await cloudinary_storage_client.delete_document_asset(storage_metadata)
         raise
 
-    return IngestProcessingResult(chunks_created=len(chunks), storage_metadata=storage_metadata)
+    return IngestProcessingResult(
+        chunks_created=len(chunk_records), storage_metadata=storage_metadata
+    )

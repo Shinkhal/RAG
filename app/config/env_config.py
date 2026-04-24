@@ -5,6 +5,7 @@ from typing import Optional
 try:
     from dotenv import load_dotenv
 except ImportError:  # pragma: no cover - production can provide env vars directly
+
     def load_dotenv() -> None:  # type: ignore[no-redef]
         return None
 
@@ -15,6 +16,7 @@ load_dotenv()
 # =====================================
 # HELPERS
 # =====================================
+
 
 def required(key: str) -> str:
     value = os.getenv(key)
@@ -56,8 +58,8 @@ def optional_number(key: str) -> Optional[int]:
 # ENV CONFIG
 # =====================================
 
-class GetEnv:
 
+class GetEnv:
     # ---------- APP ----------
     class app:
         @staticmethod
@@ -100,7 +102,6 @@ class GetEnv:
 
             return "missing"
 
-
     # ---------- REDIS ----------
     class redis:
         @staticmethod
@@ -116,8 +117,6 @@ class GetEnv:
         @staticmethod
         def public_url():
             return optional("BACKEND_PUBLIC_URL")
-
-
 
     # ---------- CLOUDINARY ----------
     class cloudinary:
@@ -310,11 +309,11 @@ class EnvSettings:
 
     @property
     def max_chunk_size(self) -> int:
-        return number("MAX_CHUNK_SIZE", 300)
+        return number("MAX_CHUNK_SIZE", 500)
 
     @property
     def chunk_overlap(self) -> int:
-        return number("CHUNK_OVERLAP", 50)
+        return number("CHUNK_OVERLAP", 20)
 
     @property
     def embedding_batch_size(self) -> int:
@@ -330,7 +329,7 @@ class EnvSettings:
 
     @property
     def default_top_k(self) -> int:
-        return number("DEFAULT_TOP_K", 10)
+        return number("DEFAULT_TOP_K", 5)
 
     @property
     def min_retrieval_score(self) -> float:
@@ -348,6 +347,7 @@ class EnvSettings:
     @property
     def max_pdf_uploads_per_hour(self) -> int:
         return number("MAX_PDF_UPLOADS_PER_HOUR", 20)
+
 
 def get_settings() -> EnvSettings:
     """Return the shared env accessor used by the app."""

@@ -1,4 +1,5 @@
 from typing import Optional
+
 import requests
 
 from app.config.env_config import GetEnv
@@ -34,9 +35,7 @@ class RedisConnection:
         try:
             endpoint = f"{self.url}/{command}/" + "/".join(map(str, args))
 
-            headers = {
-                "Authorization": f"Bearer {self.token}"
-            }
+            headers = {"Authorization": f"Bearer {self.token}"}
 
             response = requests.get(endpoint, headers=headers)
 
@@ -95,6 +94,7 @@ class RedisConnection:
 # ----------------------------------
 # Lazy accessor (same as TS)
 # ----------------------------------
+
 
 def get_redis_client() -> RedisConnection:
     return RedisConnection.get_instance()

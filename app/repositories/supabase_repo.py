@@ -1,10 +1,10 @@
 import hashlib
 from typing import Any
 
-from sqlalchemy import select, text, delete
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Chunk, Document, IngestJob, Persona, QueryLog, ChatSession
+from app.db.models import ChatSession, Chunk, Document, IngestJob, Persona, QueryLog
 
 
 class ChunkRecord:
@@ -225,22 +225,24 @@ class SupabaseRepo:
 
     async def get_session(self, session_id: str, user_id: str) -> ChatSession | None:
         stmt = select(ChatSession).where(
-            ChatSession.id == session_id,
-            ChatSession.user_id == user_id
+            ChatSession.id == session_id, ChatSession.user_id == user_id
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def delete_session(self, session_id: str, user_id: str) -> bool:
         stmt = delete(ChatSession).where(
-            ChatSession.id == session_id,
-            ChatSession.user_id == user_id
+            ChatSession.id == session_id, ChatSession.user_id == user_id
         )
         result = await self.session.execute(stmt)
         await self.session.commit()
         return result.rowcount > 0
 
     async def list_sessions(self, user_id: str) -> list[ChatSession]:
-        stmt = select(ChatSession).where(ChatSession.user_id == user_id).order_by(ChatSession.created_at.desc())
+        stmt = (
+            select(ChatSession)
+            .where(ChatSession.user_id == user_id)
+            .order_by(ChatSession.created_at.desc())
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

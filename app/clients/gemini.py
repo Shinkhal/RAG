@@ -1,10 +1,12 @@
-import math
 import asyncio
+import math
 from typing import Any, AsyncIterator
+
 from google import genai
-from google.genai import types, errors
+from google.genai import errors, types
 
 from app.config.env_config import get_settings
+
 
 class GeminiClient:
     def __init__(self) -> None:
@@ -40,7 +42,10 @@ class GeminiClient:
         return [value / norm for value in values]
 
     def _normalize_if_needed(self, values: list[float]) -> list[float]:
-        if self._embedding_model == "gemini-embedding-2" and self._embedding_output_dimensionality != 3072:
+        if (
+            self._embedding_model == "gemini-embedding-2"
+            and self._embedding_output_dimensionality != 3072
+        ):
             return self._l2_normalize(values)
         return values
 
@@ -65,14 +70,9 @@ class GeminiClient:
                         await asyncio.sleep(10.0)
                     else:
                         raise
-            
+
             if result:
-                embeddings.extend(
-                    [
-                        self._normalize_if_needed(e.values)
-                        for e in result.embeddings
-                    ]
-                )
+                embeddings.extend([self._normalize_if_needed(e.values) for e in result.embeddings])
         return embeddings
 
     async def embed_query(self, query: str) -> list[float]:
@@ -93,7 +93,7 @@ class GeminiClient:
                     await asyncio.sleep(10.0)
                 else:
                     raise
-        
+
         return self._normalize_if_needed(result.embeddings[0].values)
 
     async def generate(
@@ -161,7 +161,7 @@ Do not make up information."""
                 persona_rules = str(style_config)
             system_prompt = f"""{system_prompt}
 
-After providing the factual answer, rewrite it in the style of {persona_config.get('name', 'a helpful assistant')}.
+After providing the factual answer, rewrite it in the style of {persona_config.get("name", "a helpful assistant")}.
 {persona_rules}"""
 
         prompt = f"""Context:

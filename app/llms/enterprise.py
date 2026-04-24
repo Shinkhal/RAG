@@ -39,10 +39,14 @@ class EnterpriseTierAnthropicLLM(BaseLLMClient):
         }
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(f"{self._base_url}/messages", json=payload, headers=headers)
+            response = await client.post(
+                f"{self._base_url}/messages", json=payload, headers=headers
+            )
             response.raise_for_status()
             data = response.json()
-            text_blocks = [block["text"] for block in data.get("content", []) if block.get("type") == "text"]
+            text_blocks = [
+                block["text"] for block in data.get("content", []) if block.get("type") == "text"
+            ]
             return "".join(text_blocks)
 
     async def _generate_stream(

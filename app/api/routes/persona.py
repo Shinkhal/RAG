@@ -48,7 +48,9 @@ async def list_personas(session: AsyncSession = Depends(get_session)) -> list[Pe
 
 
 @router.get("/personas/{persona_id}", response_model=PersonaResponse)
-async def get_persona(persona_id: str, session: AsyncSession = Depends(get_session)) -> PersonaResponse:
+async def get_persona(
+    persona_id: str, session: AsyncSession = Depends(get_session)
+) -> PersonaResponse:
     # ── cache-aside: try Redis first ──
     cached = await redis_cache.get_cached_persona(persona_id)
     if cached is not None:
@@ -74,7 +76,9 @@ async def create_persona(
     repo = SupabaseRepo(session)
     existing = await repo.get_persona(request.persona_id, include_inactive=True)
     if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Persona ID already exists")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Persona ID already exists"
+        )
 
     persona = Persona(
         persona_id=request.persona_id,

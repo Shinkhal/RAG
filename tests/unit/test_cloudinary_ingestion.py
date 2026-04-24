@@ -9,7 +9,9 @@ from app.services import ingestion as ingestion_module
 
 
 @pytest.mark.asyncio
-async def test_process_ingest_job_uploads_before_extracting(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_process_ingest_job_uploads_before_extracting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[str] = []
 
     class FakeStorageClient:
@@ -60,7 +62,9 @@ async def test_process_ingest_job_uploads_before_extracting(monkeypatch: pytest.
             return len(chunks)
 
     monkeypatch.setattr(ingestion_module, "cloudinary_storage_client", FakeStorageClient())
-    monkeypatch.setattr(ingestion_module, "gemini_client", SimpleNamespace(embed_documents=fake_embed_documents))
+    monkeypatch.setattr(
+        ingestion_module, "gemini_client", SimpleNamespace(embed_documents=fake_embed_documents)
+    )
     monkeypatch.setattr(ingestion_module, "extract_text_from_pdf", fake_extract_text_from_pdf)
     monkeypatch.setattr(ingestion_module, "clean_text", fake_clean_text)
     monkeypatch.setattr(ingestion_module, "sliding_window_chunks", fake_sliding_window_chunks)
@@ -86,7 +90,9 @@ async def test_process_ingest_job_uploads_before_extracting(monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
-async def test_cloudinary_storage_client_normalizes_and_deletes(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_cloudinary_storage_client_normalizes_and_deletes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[tuple[str, object]] = []
 
     class FakeUploader:
@@ -108,7 +114,9 @@ async def test_cloudinary_storage_client_normalizes_and_deletes(monkeypatch: pyt
             calls.append(("destroy", {"public_id": public_id, **kwargs}))
             return {"result": "ok"}
 
-    monkeypatch.setattr(storage_module, "_ensure_cloudinary_config", lambda: calls.append(("init", True)))
+    monkeypatch.setattr(
+        storage_module, "_ensure_cloudinary_config", lambda: calls.append(("init", True))
+    )
     monkeypatch.setattr(storage_module, "_get_uploader", lambda: FakeUploader())
 
     client = storage_module.CloudinaryStorageClient(folder_root="documents")
@@ -130,7 +138,3 @@ async def test_cloudinary_storage_client_normalizes_and_deletes(monkeypatch: pyt
     deleted = await client.delete_document_asset({"storage": upload_result})
     assert deleted is True
     assert calls[-1][0] == "destroy"
-
-
-
-

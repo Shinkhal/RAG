@@ -1,8 +1,40 @@
 from typing import Any
 
-from app.repositories.supabase_repo import SupabaseRepo, ChunkRecord
 from app.clients.gemini import gemini_client
+from app.repositories.supabase_repo import SupabaseRepo
 from app.services.security import sanitize_context
+
+
+def _keyword_boost(text: str, query: str) -> float:
+    query_words = [w.lower() for w in query.split() if len(w) > 2]
+    text_lower = text.lower()
+    matches = sum(1 for w in query_words if w in text_lower)
+    return matches * 0.05
+
+
+def _topic_overlap(text: str, query: str) -> float:
+    text_words = set(w.lower() for w in text.split() if len(w) > 3)
+    query_words = set(w.lower() for w in query.split() if len(w) > 2)
+    if not query_words:
+        return 0.0
+    overlap = text_words & query_words
+    return len(overlap) / len(query_words)
+
+
+def _deduplicate_chunks(
+    chunks: list[tuple[dict[str, Any], float]],
+) -> list[tuple[dict[str, Any], float]]:
+    seen: list[str] = []
+    unique: list[tuple[dict[str, Any], float]] = []
+
+    for item in chunks:
+        content = item[0]["content"]
+        key = content[:400]
+        if key not in seen:
+            seen.append(key)
+            unique.append(item)
+
+    return unique
 
 
 async def retrieve_chunks(
@@ -10,9 +42,10 @@ async def retrieve_chunks(
     user_id: str,
     session_id: str,
     repo: SupabaseRepo,
-    top_k: int = 10,
-    min_score: float = 0.6,
+    top_k: int = 5,
+    min_score: float = 0.5,
     document_ids: list[str] | None = None,
+    topic_threshold: float = 0.15,
 ) -> list[tuple[dict[str, Any], float]]:
     query_embedding = await gemini_client.embed_query(query)
 
@@ -25,12 +58,16 @@ async def retrieve_chunks(
         document_ids=document_ids,
     )
 
-    print("RAW DB RESULTS:", len(results))
-
-    sanitized = []
-    for chunk, score in results:
+    scored: list[tuple[dict[str, Any], float]] = []
+    for chunk, raw_score in results:
         clean_content = sanitize_context([{"content": chunk.content}])[0]["content"]
-        sanitized.append(
+        boost = _keyword_boost(clean_content, query)
+        final_score = min(raw_score + boost, 1.0)
+
+        topic_score = _topic_overlap(clean_content, query)
+        combined_score = final_score * (1 + topic_score)
+
+        scored.append(
             (
                 {
                     "content": clean_content,
@@ -38,25 +75,15 @@ async def retrieve_chunks(
                     "chunk_idx": chunk.chunk_idx,
                     "metadata": chunk.metadata_,
                 },
-                score,
+                min(combined_score, 1.0),
             )
         )
 
-    sorted_sanitized = sorted(sanitized, key=lambda x: x[1], reverse=True)
-    
-    seen = set()
-    unique_chunks = []
-    
-    for item in sorted_sanitized:
-        chunk = item[0]
-        content = chunk["content"]
-        if content not in seen:
-            seen.add(content)
-            unique_chunks.append(item)
+    sorted_chunks = sorted(scored, key=lambda x: x[1], reverse=True)
+    unique_chunks = _deduplicate_chunks(sorted_chunks)
+    top = unique_chunks[:top_k]
 
-    final_results = unique_chunks[:top_k]
-    print("\n==== RETRIEVED CHUNKS ====")
-    for i, (chunk, _) in enumerate(final_results):
-        print(f"\n{i}: {chunk['content'][:300]}")
+    if top and _topic_overlap(top[0][0]["content"], query) < topic_threshold:
+        return top[:3]
 
-    return final_results
+    return top

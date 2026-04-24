@@ -2,9 +2,10 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import String, Text, Integer, Float, Boolean, DateTime, ForeignKey, JSON, Index
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.config.env_config import get_settings
 
 try:
@@ -28,11 +29,11 @@ class ChatSession(Base):
         onupdate=datetime.utcnow,
     )
 
-    documents: Mapped[list["Document"]] = relationship(back_populates="session", cascade="all, delete-orphan")
-
-    __table_args__ = (
-        Index("ix_chat_sessions_user_created", "user_id", "created_at"),
+    documents: Mapped[list["Document"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
     )
+
+    __table_args__ = (Index("ix_chat_sessions_user_created", "user_id", "created_at"),)
 
 
 EMBEDDING_DIMENSION = get_settings().embedding_output_dimensionality
@@ -43,7 +44,9 @@ class Document(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    session_id: Mapped[str] = mapped_column(String, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(
+        String, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     status: Mapped[str] = mapped_column(
         String,
         nullable=False,
@@ -57,8 +60,12 @@ class Document(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    chunks: Mapped[list["Chunk"]] = relationship(back_populates="document", cascade="all, delete-orphan")
-    jobs: Mapped[list["IngestJob"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+    chunks: Mapped[list["Chunk"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
+    )
+    jobs: Mapped[list["IngestJob"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
+    )
     session: Mapped["ChatSession"] = relationship(back_populates="documents")
 
 
@@ -66,8 +73,12 @@ class Chunk(Base):
     __tablename__ = "chunks"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id: Mapped[str] = mapped_column(String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
-    session_id: Mapped[str] = mapped_column(String, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id: Mapped[str] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    session_id: Mapped[str] = mapped_column(
+        String, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     user_id: Mapped[str] = mapped_column(String, nullable=False)
     chunk_idx: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -90,8 +101,12 @@ class IngestJob(Base):
     __tablename__ = "ingest_jobs"
 
     job_id: Mapped[str] = mapped_column(String, primary_key=True)
-    document_id: Mapped[str] = mapped_column(String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
-    session_id: Mapped[str] = mapped_column(String, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False)
+    document_id: Mapped[str] = mapped_column(
+        String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    session_id: Mapped[str] = mapped_column(
+        String, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False
+    )
     user_id: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, default="queued")
     chunks_created: Mapped[int] = mapped_column(Integer, default=0)
@@ -101,9 +116,7 @@ class IngestJob(Base):
 
     document: Mapped["Document"] = relationship(back_populates="jobs")
 
-    __table_args__ = (
-        Index("ix_ingest_jobs_user_status", "user_id", "status"),
-    )
+    __table_args__ = (Index("ix_ingest_jobs_user_status", "user_id", "status"),)
 
 
 class QueryLog(Base):
@@ -121,9 +134,7 @@ class QueryLog(Base):
     cached: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
-    __table_args__ = (
-        Index("ix_query_logs_user_created", "user_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_query_logs_user_created", "user_id", "created_at"),)
 
 
 class Persona(Base):
@@ -156,6 +167,4 @@ class Persona(Base):
         onupdate=datetime.utcnow,
     )
 
-    __table_args__ = (
-        Index("ix_personas_is_active", "is_active"),
-    )
+    __table_args__ = (Index("ix_personas_is_active", "is_active"),)

@@ -28,3 +28,10 @@ See `db/migrations/002_indexes.sql`.
 
 Row-level security policies to prevent cross-user data leakage live in
 `db/migrations/003_rls.sql` and are intentionally not auto-applied on startup yet.
+
+---
+
+**File:** `db/migrations/005_chat_sessions.sql`
+
+Adds `chat_sessions` and backfills/links `session_id` across `documents`,
+`chunks`, and `ingest_jobs` with foreign keys and supporting indexes.

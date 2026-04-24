@@ -1,7 +1,7 @@
-from .chunking import sliding_window_chunks, batched
+from .chunking import batched, sliding_window_chunks
+from .generation import generate_answer
 from .ingestion import process_ingest_job
 from .retrieval import retrieve_chunks
-from .generation import generate_answer
 from .security import sanitize_context
 
 __all__ = [

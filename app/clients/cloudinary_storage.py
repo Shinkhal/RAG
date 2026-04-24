@@ -123,4 +123,3 @@ class CloudinaryStorageClient:
 
 
 cloudinary_storage_client = CloudinaryStorageClient()
-

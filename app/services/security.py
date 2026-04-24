@@ -1,7 +1,6 @@
 import re
 from typing import Any
 
-
 BANNED_PATTERNS = [
     r"ignore (previous|above|all)",
     r"you are now",

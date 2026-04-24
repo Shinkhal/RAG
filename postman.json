@@ -1,13 +1,14 @@
 {
   "info": {
     "name": "RAG Microservice",
-    "description": "Full test collection for the RAG Microservice API – ingestion, querying, bulk ops, and persona management.",
+    "description": "Full test collection for the RAG Microservice API – sessions, ingestion, querying, bulk ops, and persona management.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     { "key": "base_url", "value": "http://localhost:8000", "type": "string" },
     { "key": "user_id", "value": "test-user-001", "type": "string" },
     { "key": "admin_id", "value": "admin", "type": "string" },
+    { "key": "session_id", "value": "", "type": "string" },
     { "key": "document_id", "value": "", "type": "string" },
     { "key": "job_id", "value": "", "type": "string" },
     { "key": "persona_id", "value": "friendly-tutor", "type": "string" }
@@ -35,6 +36,79 @@
       ]
     },
     {
+      "name": "Sessions",
+      "item": [
+        {
+          "name": "Create Session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  var json = pm.response.json();",
+                  "  pm.collectionVariables.set('session_id', json.id);",
+                  "  pm.test('Session has an id', function () {",
+                  "    pm.expect(json.id).to.be.a('string');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/rag/sessions",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"title\": \"My Research Session\"\n}"
+            }
+          }
+        },
+        {
+          "name": "List Sessions",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/rag/sessions?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rag", "sessions"],
+              "query": [{ "key": "user_id", "value": "{{user_id}}" }]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "Get Session by ID",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/rag/sessions/{{session_id}}?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rag", "sessions", "{{session_id}}"],
+              "query": [{ "key": "user_id", "value": "{{user_id}}" }]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "Delete Session",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/v1/rag/sessions/{{session_id}}?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rag", "sessions", "{{session_id}}"],
+              "query": [{ "key": "user_id", "value": "{{user_id}}" }]
+            },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
       "name": "Ingestion",
       "item": [
         {
@@ -48,6 +122,7 @@
                   "if (pm.response.code === 200) {",
                   "  var json = pm.response.json();",
                   "  pm.collectionVariables.set('document_id', json.document_id);",
+                  "  pm.collectionVariables.set('job_id', json.document_id);",
                   "  pm.test('Status is processed', function () {",
                   "    pm.expect(json.status).to.eql('processed');",
                   "  });",
@@ -64,6 +139,7 @@
               "mode": "formdata",
               "formdata": [
                 { "key": "user_id", "value": "{{user_id}}", "type": "text" },
+                { "key": "session_id", "value": "{{session_id}}", "type": "text" },
                 { "key": "file", "type": "file", "src": "", "description": "Select a PDF or text file to ingest" }
               ]
             }
@@ -108,7 +184,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"query\": \"What is the refund policy?\",\n  \"user_id\": \"{{user_id}}\",\n  \"subscription_tier\": \"free\"\n}"
+              "raw": "{\n  \"query\": \"What is the refund policy?\",\n  \"user_id\": \"{{user_id}}\",\n  \"session_id\": \"{{session_id}}\",\n  \"subscription_tier\": \"free\"\n}"
             }
           }
         },
@@ -120,7 +196,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"query\": \"Explain the main concepts in my document\",\n  \"user_id\": \"{{user_id}}\",\n  \"subscription_tier\": \"pro\",\n  \"persona\": {\n    \"persona_id\": \"{{persona_id}}\",\n    \"intensity\": 0.8\n  },\n  \"config\": {\n    \"top_k\": 5,\n    \"min_score\": 0.7\n  }\n}"
+              "raw": "{\n  \"query\": \"Explain the main concepts in my document\",\n  \"user_id\": \"{{user_id}}\",\n  \"session_id\": \"{{session_id}}\",\n  \"subscription_tier\": \"pro\",\n  \"persona\": {\n    \"persona_id\": \"{{persona_id}}\",\n    \"intensity\": 0.8\n  },\n  \"config\": {\n    \"top_k\": 5,\n    \"min_score\": 0.7\n  }\n}"
             }
           }
         },
@@ -132,7 +208,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"query\": \"Summarize the key findings\",\n  \"user_id\": \"{{user_id}}\",\n  \"subscription_tier\": \"free\",\n  \"filters\": {\n    \"doc_ids\": [\"{{document_id}}\"]\n  },\n  \"config\": {\n    \"top_k\": 3,\n    \"min_score\": 0.6\n  }\n}"
+              "raw": "{\n  \"query\": \"Summarize the key findings\",\n  \"user_id\": \"{{user_id}}\",\n  \"session_id\": \"{{session_id}}\",\n  \"subscription_tier\": \"free\",\n  \"filters\": {\n    \"doc_ids\": [\"{{document_id}}\"]\n  },\n  \"config\": {\n    \"top_k\": 3,\n    \"min_score\": 0.6\n  }\n}"
             }
           }
         },
@@ -147,7 +223,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"query\": \"Give me a detailed summary\",\n  \"user_id\": \"{{user_id}}\",\n  \"subscription_tier\": \"pro\",\n  \"persona\": {\n    \"persona_id\": \"{{persona_id}}\",\n    \"intensity\": 0.9\n  }\n}"
+              "raw": "{\n  \"query\": \"Give me a detailed summary\",\n  \"user_id\": \"{{user_id}}\",\n  \"session_id\": \"{{session_id}}\",\n  \"subscription_tier\": \"pro\",\n  \"persona\": {\n    \"persona_id\": \"{{persona_id}}\",\n    \"intensity\": 0.9\n  }\n}"
             }
           }
         }
@@ -187,7 +263,7 @@
           }
         },
         {
-          "name": "Reindex Document",
+          "name": "Reindex Document (placeholder)",
           "request": {
             "method": "POST",
             "url": {

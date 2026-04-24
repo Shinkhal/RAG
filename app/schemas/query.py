@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -35,6 +34,8 @@ class QueryMetadata(BaseModel):
     tokens_used: int
     processing_time_ms: int
     cached: bool = False
+    confidence: float | None = None
+    general_fallback: bool = False
 
 
 class QueryResponse(BaseModel):

@@ -30,29 +30,15 @@ def main():
     commands = {
         "help": lambda: print_help(),
         "install": lambda: run_command(
-            f"{VENV_PYTHON} -m pip install -r requirements.txt",
-            "Installing dependencies"
+            f"{VENV_PYTHON} -m pip install -r requirements.txt", "Installing dependencies"
         ),
         "run": lambda: run_command(
-            f"{VENV_PYTHON} -m uvicorn app.main:app --reload",
-            "Starting FastAPI server"
+            f"{VENV_PYTHON} -m uvicorn app.main:app --reload", "Starting FastAPI server"
         ),
-        "test": lambda: run_command(
-            f"{VENV_PYTHON} -m pytest -q",
-            "Running tests"
-        ),
-        "lint": lambda: run_command(
-            f"{VENV_PYTHON} -m ruff check .",
-            "Running linter"
-        ),
-        "format": lambda: run_command(
-            f"{VENV_PYTHON} -m ruff format .",
-            "Formatting code"
-        ),
-        "typecheck": lambda: run_command(
-            f"{VENV_PYTHON} -m mypy app",
-            "Type checking"
-        ),
+        "test": lambda: run_command(f"{VENV_PYTHON} -m pytest -q", "Running tests"),
+        "lint": lambda: run_command(f"{VENV_PYTHON} -m ruff check .", "Running linter"),
+        "format": lambda: run_command(f"{VENV_PYTHON} -m ruff format .", "Formatting code"),
+        "typecheck": lambda: run_command(f"{VENV_PYTHON} -m mypy app", "Type checking"),
     }
 
     cmd = sys.argv[1].lower() if len(sys.argv) > 1 else "help"
@@ -96,4 +82,3 @@ Examples:
 
 if __name__ == "__main__":
     main()
-

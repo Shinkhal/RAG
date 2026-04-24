@@ -3,16 +3,16 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clients.redis_cache import redis_cache
 from app.db import get_session
 from app.db.models import Document, IngestJob
 from app.repositories.supabase_repo import SupabaseRepo
+from app.schemas.ingest import DocumentResponse, IngestResponse, IngestStatusResponse
+from app.services.chunking import SUPPORTED_MIME_TYPES, is_supported_file
 from app.services.ingestion import process_ingest_job
-from app.services.chunking import is_supported_file, SUPPORTED_MIME_TYPES
-from app.schemas.ingest import IngestResponse, IngestStatusResponse, DocumentResponse
-from app.clients.redis_cache import redis_cache
 
 router = APIRouter()
 
@@ -27,6 +27,7 @@ async def ingest_document(
 ) -> IngestResponse:
     if not is_supported_file(file.content_type, file.filename):
         from fastapi import HTTPException
+
         supported = ", ".join(SUPPORTED_MIME_TYPES.keys())
         raise HTTPException(
             status_code=400,
@@ -35,37 +36,42 @@ async def ingest_document(
 
     if file.content_type == "application/pdf":
         from app.config.env_config import get_settings
+
         max_size_mb = get_settings().max_pdf_size_mb
         max_size_bytes = max_size_mb * 1024 * 1024
-        
+
         # Check size if available (FastAPI 0.100.0+)
         if file.size and file.size > max_size_bytes:
             from fastapi import HTTPException
+
             raise HTTPException(
                 status_code=400,
                 detail=f"PDF file size exceeds the limit of {max_size_mb} MB",
             )
-            
+
         # Enforce rate limit
         rate_limit_key = f"rate_limit:pdf_upload:{user_id}"
         max_uploads = get_settings().max_pdf_uploads_per_hour
         is_allowed = await redis_cache.increment_rate_limit(rate_limit_key, max_uploads, 3600)
-        
+
         if not is_allowed:
             from fastapi import HTTPException
+
             raise HTTPException(
                 status_code=429,
                 detail=f"Too many PDF uploads. Limit is {max_uploads} per hour.",
             )
 
     file_data = await file.read()
-    
+
     if file.content_type == "application/pdf":
         from app.config.env_config import get_settings
+
         max_size_mb = get_settings().max_pdf_size_mb
         max_size_bytes = max_size_mb * 1024 * 1024
         if len(file_data) > max_size_bytes:
             from fastapi import HTTPException
+
             raise HTTPException(
                 status_code=400,
                 detail=f"PDF file size exceeds the limit of {max_size_mb} MB",
@@ -96,16 +102,19 @@ async def ingest_document(
     await repo.create_ingest_job(job)
 
     try:
-        ingest_result = cast(object, await process_ingest_job(
-            document_id=document_id,
-            session_id=session_id,
-            user_id=user_id,
-            file_data=file_data,
-            filename=file.filename or "document.pdf",
-            content_type=file.content_type,
-            metadata=metadata or {},
-            repo=repo,
-        ))
+        ingest_result = cast(
+            object,
+            await process_ingest_job(
+                document_id=document_id,
+                session_id=session_id,
+                user_id=user_id,
+                file_data=file_data,
+                filename=file.filename or "document.pdf",
+                content_type=file.content_type,
+                metadata=metadata or {},
+                repo=repo,
+            ),
+        )
         chunks_created = cast(int, getattr(ingest_result, "chunks_created"))
         storage_metadata = cast(dict[str, Any], getattr(ingest_result, "storage_metadata"))
 
@@ -155,6 +164,7 @@ async def get_ingest_status(
 
     repo = SupabaseRepo(session)
     from sqlalchemy import select
+
     from app.db.models import IngestJob
 
     stmt = select(IngestJob).where(IngestJob.job_id == job_id, IngestJob.user_id == user_id)
@@ -163,6 +173,7 @@ async def get_ingest_status(
 
     if not job:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Job not found")
 
     response = IngestStatusResponse(
@@ -193,6 +204,7 @@ async def get_document(
 
     if not doc:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Document not found")
 
     response = DocumentResponse(

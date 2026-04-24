@@ -2,10 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.cloudinary_storage import cloudinary_storage_client, extract_storage_metadata
+from app.clients.redis_cache import redis_cache
 from app.db import get_session
 from app.repositories.supabase_repo import SupabaseRepo
 from app.schemas.ingest import DeleteResponse
-from app.clients.redis_cache import redis_cache
 
 router = APIRouter()
 

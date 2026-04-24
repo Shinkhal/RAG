@@ -1,15 +1,12 @@
 import io
 import re
-from typing import Iterator
 from itertools import islice
+from typing import Iterator, NamedTuple
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.config.env_config import get_settings
 
-# ── Supported file types ────────────────────────────────────────────
-# Maps MIME types to their text-extraction functions.
-# Extend this dict when adding support for new formats (docx, md, …).
 SUPPORTED_MIME_TYPES: dict[str, str] = {
     "application/pdf": "pdf",
     "text/plain": "text",
@@ -18,29 +15,34 @@ SUPPORTED_MIME_TYPES: dict[str, str] = {
 }
 
 
+class ExtractedPage(NamedTuple):
+    page_num: int
+    text: str
+
+
 def is_supported_file(content_type: str | None, filename: str | None = None) -> bool:
-    """Return True if the file's MIME type (or extension fallback) is supported."""
     if content_type and content_type in SUPPORTED_MIME_TYPES:
         return True
-    # Fallback: check extension when MIME is missing/generic
     if filename:
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         return ext in {"pdf", "txt", "md", "csv"}
     return False
 
 
-def extract_text(file_data: bytes, content_type: str | None = None, filename: str | None = None) -> str:
-    """Dispatch to the correct extractor based on MIME type / extension."""
+def extract_text(
+    file_data: bytes, content_type: str | None = None, filename: str | None = None
+) -> str:
     kind = SUPPORTED_MIME_TYPES.get(content_type or "")
 
-    # Fallback to extension-based detection
     if kind is None and filename and "." in filename:
         ext = filename.rsplit(".", 1)[-1].lower()
         ext_map = {"pdf": "pdf", "txt": "text", "md": "text", "csv": "text"}
         kind = ext_map.get(ext)
 
     if kind == "pdf":
-        return extract_text_from_pdf(file_data)
+        pages = extract_pages_from_pdf(file_data)
+        return "\n\n".join(p.text for p in pages)
+
     if kind == "text":
         return extract_text_from_plain(file_data)
 
@@ -50,9 +52,7 @@ def extract_text(file_data: bytes, content_type: str | None = None, filename: st
     )
 
 
-# ── Extractors ──────────────────────────────────────────────────────
-
-def extract_text_from_pdf(file_data: bytes) -> str:
+def extract_pages_from_pdf(file_data: bytes) -> list[ExtractedPage]:
     from PyPDF2 import PdfReader
     from PyPDF2.errors import PdfReadError
 
@@ -60,24 +60,27 @@ def extract_text_from_pdf(file_data: bytes) -> str:
         reader = PdfReader(io.BytesIO(file_data))
     except PdfReadError as exc:
         raise ValueError(
-            "The uploaded file is not a valid PDF or is corrupted. "
-            "Please upload a valid .pdf file."
+            "The uploaded file is not a valid PDF or is corrupted. Please upload a valid .pdf file."
         ) from exc
 
-    text_parts = []
-    for page in reader.pages:
+    pages: list[ExtractedPage] = []
+    for page_num, page in enumerate(reader.pages, start=1):
         text = page.extract_text()
         if text:
-            text_parts.append(text)
+            pages.append(ExtractedPage(page_num=page_num, text=text))
 
-    if not text_parts:
+    if not pages:
         raise ValueError("The PDF file contains no extractable text (it may be image-only).")
 
-    return "\n\n".join(text_parts)
+    return pages
+
+
+def extract_text_from_pdf(file_data: bytes) -> str:
+    pages = extract_pages_from_pdf(file_data)
+    return "\n\n".join(p.text for p in pages)
 
 
 def extract_text_from_plain(file_data: bytes) -> str:
-    """Decode plain-text files (txt, md, csv)."""
     for encoding in ("utf-8", "utf-8-sig", "latin-1"):
         try:
             return file_data.decode(encoding)
@@ -85,8 +88,6 @@ def extract_text_from_plain(file_data: bytes) -> str:
             continue
     raise ValueError("Could not decode the text file. Please ensure it uses UTF-8 encoding.")
 
-
-# ── Chunking ────────────────────────────────────────────────────────
 
 def sliding_window_chunks(
     text: str,

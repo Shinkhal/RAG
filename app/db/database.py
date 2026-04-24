@@ -1,10 +1,11 @@
 from __future__ import annotations
+
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from app.config.env_config import get_settings
 from app.utils.logger import logger
@@ -30,13 +31,16 @@ engine = create_async_engine(ASYNC_DATABASE_URL, poolclass=NullPool)
 
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+
 class Base(DeclarativeBase):
     pass
+
 
 def check_connection() -> None:
     """Synchronously check if the database is reachable."""
     with sync_engine.connect() as conn:
         conn.execute(text("SELECT 1"))
+
 
 def _split_sql_statements(sql: str) -> list[str]:
     """Split a SQL string into individual statements, ignoring comments and empty lines."""
@@ -47,11 +51,12 @@ def _split_sql_statements(sql: str) -> list[str]:
             stripped = subline.strip()
             if stripped and not stripped.startswith("--"):
                 clean_line += " " + stripped
-        
+
         final_stmt = clean_line.strip()
         if final_stmt:
             statements.append(final_stmt)
     return statements
+
 
 async def init_db() -> None:
     """Initialize database connection, extensions, and tables."""
@@ -62,13 +67,14 @@ async def init_db() -> None:
 
         # Import models here to ensure they are registered with Base.metadata
         from . import models  # noqa: F401
+
         logger.info("Models imported, starting sync connection...")
 
         with sync_engine.begin() as conn:
             logger.info("Sync connection established, creating extensions...")
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
-            
+
             # Run manual migrations if they exist
             if MIGRATIONS_DIR.exists():
                 logger.info(f"Running migrations from {MIGRATIONS_DIR}...")
@@ -83,12 +89,13 @@ async def init_db() -> None:
         logger.info("Extensions and migrations verified, creating tables...")
         # Create all tables defined in models (that might not be in migrations)
         Base.metadata.create_all(sync_engine)
-            
+
         logger.info("✅ Database initialized (extensions, migrations and tables verified)")
     except Exception as e:
         logger.error(f"❌ Failed to initialize database: {e}")
         if settings.is_production:
             raise
+
 
 async def get_session() -> AsyncSession:
     """Dependency for async database sessions."""

@@ -1,21 +1,22 @@
-import json
 import hashlib
+import json
 from typing import Any
 from urllib.parse import quote
 
 import httpx
-
-from app.core.redis_keys import RedisKeys
 import redis.asyncio as redis
 
 from app.config.env_config import get_settings
+from app.core.redis_keys import RedisKeys
 
 try:
-    from upstash_redis.asyncio import Redis as UpstashRedis
     from upstash_ratelimit.asyncio import Ratelimit, SlidingWindow
+    from upstash_redis.asyncio import Redis as UpstashRedis
+
     HAS_UPSTASH_RATELIMIT = True
 except ImportError:
     HAS_UPSTASH_RATELIMIT = False
+
 
 class RedisCache:
     def __init__(self) -> None:
@@ -45,8 +46,10 @@ class RedisCache:
             upstash_redis_client = UpstashRedis(url=self._rest_url, token=self._rest_token)
             self._upstash_ratelimit = Ratelimit(
                 redis=upstash_redis_client,
-                limiter=SlidingWindow(max_requests=settings.max_pdf_uploads_per_hour, window=3600, unit="s"),
-                prefix="@upstash/ratelimit"
+                limiter=SlidingWindow(
+                    max_requests=settings.max_pdf_uploads_per_hour, window=3600, unit="s"
+                ),
+                prefix="@upstash/ratelimit",
             )
 
     async def _rest_get(self, key: str) -> dict[str, Any] | None:
@@ -144,13 +147,15 @@ class RedisCache:
 
         if not self._client:
             return True
-            
+
         current = await self._client.incr(key)
         if current == 1:
             await self._client.expire(key, window_seconds)
         return current <= limit
 
-    async def get_cached_query(self, user_id: str, query: str, persona_id: str | None = None) -> dict[str, Any] | None:
+    async def get_cached_query(
+        self, user_id: str, query: str, persona_id: str | None = None
+    ) -> dict[str, Any] | None:
         key = self._make_key(user_id, query, persona_id)
         return await self.get(key)
 
@@ -179,7 +184,9 @@ class RedisCache:
         """Remove a single persona from cache."""
         await self.delete(RedisKeys.persona(persona_id))
 
-    async def get_cached_persona_list(self, include_inactive: bool = False) -> list[dict[str, Any]] | None:
+    async def get_cached_persona_list(
+        self, include_inactive: bool = False
+    ) -> list[dict[str, Any]] | None:
         """Return the cached persona list, or None on miss."""
         key = RedisKeys.PERSONA_LIST_ALL if include_inactive else RedisKeys.PERSONA_LIST_ACTIVE
         result = await self.get(key)

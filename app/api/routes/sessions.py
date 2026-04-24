@@ -1,5 +1,6 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,6 +49,26 @@ async def create_session(
     )
 
 
+@router.get("/sessions", response_model=list[SessionResponse])
+async def list_sessions(
+    user_id: str,
+    db_session: AsyncSession = Depends(get_session),
+) -> list[SessionResponse]:
+    repo = SupabaseRepo(db_session)
+    sessions = await repo.list_sessions(user_id)
+
+    return [
+        SessionResponse(
+            id=s.id,
+            user_id=s.user_id,
+            title=s.title,
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+        )
+        for s in sessions
+    ]
+
+
 @router.get("/sessions/{session_id}", response_model=SessionResponse)
 async def get_session(
     session_id: str,
@@ -82,23 +103,3 @@ async def delete_session(
         raise HTTPException(status_code=404, detail="Session not found")
 
     return {"deleted": True}
-
-
-@router.get("/sessions", response_model=list[SessionResponse])
-async def list_sessions(
-    user_id: str,
-    db_session: AsyncSession = Depends(get_session),
-) -> list[SessionResponse]:
-    repo = SupabaseRepo(db_session)
-    sessions = await repo.list_sessions(user_id)
-
-    return [
-        SessionResponse(
-            id=s.id,
-            user_id=s.user_id,
-            title=s.title,
-            created_at=s.created_at,
-            updated_at=s.updated_at,
-        )
-        for s in sessions
-    ]
