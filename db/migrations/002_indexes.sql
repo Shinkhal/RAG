@@ -1,5 +1,4 @@
-CREATE INDEX IF NOT EXISTS ix_chunks_embedding_hnsw
-  ON chunks USING hnsw (embedding vector_cosine_ops);
+-- HNSW index removed because column is 768 dimensions. IVFFlat created in 004.
 
 CREATE INDEX IF NOT EXISTS ix_chunks_user_id
   ON chunks (user_id);
