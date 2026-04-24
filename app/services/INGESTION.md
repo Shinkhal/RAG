@@ -6,7 +6,7 @@
 - Orchestrate async ingestion jobs
 - Chunk documents
 - Embed chunks (batch for speed)
-- Store chunks in Supabase pgvector
+- Store chunks in Postgres pgvector
 - Track job status (queued → processing → processed/failed)
 
 ## Key Functions

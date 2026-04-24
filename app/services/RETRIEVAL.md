@@ -22,7 +22,7 @@ retrieve_chunks(
 
 ## Flow
 1. Embed query (RETRIEVAL_QUERY task)
-2. Search Supabase pgvector (top-20)
+2. Search Postgres pgvector (top-20)
 3. Rerank to top-5 (if enabled)
 4. Apply score threshold (0.7 default)
 5. Return with scores
