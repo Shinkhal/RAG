@@ -1,0 +1,266 @@
+{
+  "info": {
+    "name": "RAG Microservice",
+    "description": "Full test collection for the RAG Microservice API – ingestion, querying, bulk ops, and persona management.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000", "type": "string" },
+    { "key": "user_id", "value": "test-user-001", "type": "string" },
+    { "key": "admin_id", "value": "admin", "type": "string" },
+    { "key": "document_id", "value": "", "type": "string" },
+    { "key": "job_id", "value": "", "type": "string" },
+    { "key": "persona_id", "value": "friendly-tutor", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health & Info",
+      "item": [
+        {
+          "name": "Root",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/",
+            "header": []
+          }
+        },
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/health",
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ingestion",
+      "item": [
+        {
+          "name": "Ingest Document (file upload)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  var json = pm.response.json();",
+                  "  pm.collectionVariables.set('document_id', json.document_id);",
+                  "  pm.test('Status is processed', function () {",
+                  "    pm.expect(json.status).to.eql('processed');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/rag/ingest",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "user_id", "value": "{{user_id}}", "type": "text" },
+                { "key": "file", "type": "file", "src": "", "description": "Select a PDF or text file to ingest" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Ingest Job Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/rag/ingest/status/{{job_id}}?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rag", "ingest", "status", "{{job_id}}"],
+              "query": [{ "key": "user_id", "value": "{{user_id}}" }]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "Get Document",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/rag/documents/{{document_id}}?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rag", "documents", "{{document_id}}"],
+              "query": [{ "key": "user_id", "value": "{{user_id}}" }]
+            },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "Query (RAG)",
+      "item": [
+        {
+          "name": "Query – basic (no persona)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/rag/query",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"What is the refund policy?\",\n  \"user_id\": \"{{user_id}}\",\n  \"subscription_tier\": \"free\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Query – with persona",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/rag/query",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Explain the main concepts in my document\",\n  \"user_id\": \"{{user_id}}\",\n  \"subscription_tier\": \"pro\",\n  \"persona\": {\n    \"persona_id\": \"{{persona_id}}\",\n    \"intensity\": 0.8\n  },\n  \"config\": {\n    \"top_k\": 5,\n    \"min_score\": 0.7\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Query – with filters",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/rag/query",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Summarize the key findings\",\n  \"user_id\": \"{{user_id}}\",\n  \"subscription_tier\": \"free\",\n  \"filters\": {\n    \"doc_ids\": [\"{{document_id}}\"]\n  },\n  \"config\": {\n    \"top_k\": 3,\n    \"min_score\": 0.6\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Query – SSE stream",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/rag/query/stream",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "text/event-stream" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Give me a detailed summary\",\n  \"user_id\": \"{{user_id}}\",\n  \"subscription_tier\": \"pro\",\n  \"persona\": {\n    \"persona_id\": \"{{persona_id}}\",\n    \"intensity\": 0.9\n  }\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bulk Operations",
+      "item": [
+        {
+          "name": "Delete Single Document",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/v1/rag/documents/{{document_id}}?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rag", "documents", "{{document_id}}"],
+              "query": [{ "key": "user_id", "value": "{{user_id}}" }]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "Bulk Delete Documents",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/rag/bulk-delete?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rag", "bulk-delete"],
+              "query": [{ "key": "user_id", "value": "{{user_id}}" }]
+            },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "[\"doc-id-1\", \"doc-id-2\"]"
+            }
+          }
+        },
+        {
+          "name": "Reindex Document",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/v1/rag/reindex/{{document_id}}?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rag", "reindex", "{{document_id}}"],
+              "query": [{ "key": "user_id", "value": "{{user_id}}" }]
+            },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "Personas – Public",
+      "item": [
+        {
+          "name": "List All Personas",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/rag/personas",
+            "header": []
+          }
+        },
+        {
+          "name": "Get Persona by ID",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/rag/personas/{{persona_id}}",
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "Personas – Admin",
+      "item": [
+        {
+          "name": "Create Persona",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/rag/admin/personas",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-admin-id", "value": "{{admin_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"persona_id\": \"friendly-tutor\",\n  \"name\": \"Friendly Tutor\",\n  \"description\": \"A warm, encouraging tutor who explains concepts simply.\",\n  \"style_config\": {\n    \"system_prompt\": \"You are a friendly, patient tutor. Explain concepts in simple terms, use analogies, and encourage the learner.\"\n  },\n  \"intensity\": 0.7,\n  \"sample_responses\": [\n    { \"query\": \"What is RAG?\", \"response\": \"Great question! RAG stands for Retrieval-Augmented Generation…\" }\n  ],\n  \"is_active\": true,\n  \"version\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Persona",
+          "request": {
+            "method": "PUT",
+            "url": "{{base_url}}/api/v1/rag/admin/personas/{{persona_id}}",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Friendly Tutor v2\",\n  \"description\": \"Updated tutor with improved style.\",\n  \"intensity\": 0.85,\n  \"is_active\": true,\n  \"version\": 2\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Persona",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/rag/admin/personas/{{persona_id}}",
+            "header": []
+          }
+        }
+      ]
+    }
+  ]
+}

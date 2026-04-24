@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+
+# Environment variables
+.env
+
+# Testing
+.pytest_cache/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Development Scripts & Tools
+/check_all_tables.py
+/check_db_details.py
+/check_indexes.py
+/debug_create.py
+/test_db.py
+/user_snippet.py
+/run.bat
+/access_request_sheet.csv
+
+# Documentation & PRDs (Dev focused)
+/prd.md
+/STRUCTURE.md

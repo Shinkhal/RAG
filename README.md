@@ -48,10 +48,13 @@ GET /health
 
 Core variables are listed in `.env.example`, including:
 
-- `DATABASE_URL`
+- `DATABASE_URL` (use the exact PostgreSQL connection string for your database)
 - `GEMINI_API_KEY`
-- `REDIS_URL` and `REDIS_TOKEN`
+- `REDIS_URL` and `REDIS_TOKEN` (Redis protocol)
+- `REDIS_REST_URL` and `REDIS_REST_TOKEN` (Upstash REST fallback)
+- `UPSTASH_VECTOR_REST_URL`, `UPSTASH_VECTOR_REST_TOKEN` (optional; not active in retrieval yet)
 - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`
+- `PERSONA_ADMIN_TOKEN` (required for admin persona CRUD endpoints)
 
 ## API Endpoints (Current)
 
@@ -62,6 +65,11 @@ Base prefix: `/api/v1/rag`
 - `GET /documents/{document_id}`
 - `POST /query`
 - `POST /query/stream`
+- `GET /personas`
+- `GET /personas/{persona_id}`
+- `POST /admin/personas`
+- `PUT /admin/personas/{persona_id}`
+- `DELETE /admin/personas/{persona_id}`
 - `DELETE /documents/{document_id}`
 - `POST /bulk-delete`
 - `POST /reindex/{document_id}` (placeholder)
@@ -82,4 +90,6 @@ If you use `make`, available targets include:
 ## Notes
 
 - Tests are scaffolded; test cases still need implementation.
+- On startup the app connects to Postgres, applies the schema migrations,
+  and reports the database state through `/health`.
 - Some implementation areas are still in-progress.
