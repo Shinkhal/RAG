@@ -40,7 +40,7 @@ async def test_process_ingest_job_uploads_before_extracting(
         calls.append("embed")
         return [[1.0] for _ in texts]
 
-    def fake_extract_text_from_pdf(file_data: bytes) -> str:
+    def fake_extract_text(file_data: bytes, content_type: str | None = None, filename: str | None = None) -> str:
         calls.append("extract")
         return "hello world"
 
@@ -65,18 +65,19 @@ async def test_process_ingest_job_uploads_before_extracting(
     monkeypatch.setattr(
         ingestion_module, "gemini_client", SimpleNamespace(embed_documents=fake_embed_documents)
     )
-    monkeypatch.setattr(ingestion_module, "extract_text_from_pdf", fake_extract_text_from_pdf)
+    monkeypatch.setattr(ingestion_module, "extract_text", fake_extract_text)
     monkeypatch.setattr(ingestion_module, "clean_text", fake_clean_text)
     monkeypatch.setattr(ingestion_module, "sliding_window_chunks", fake_sliding_window_chunks)
 
     repo = cast(SupabaseRepo, FakeRepo())
     ingest_result = await ingestion_module.process_ingest_job(
         document_id="doc-123",
+        session_id="session-1",
         user_id="user-1",
-        file_data=b"%PDF-1.4",
-        filename="report.pdf",
+        file_data=b"hello world plain text",
+        filename="report.txt",
         repo=repo,
-        content_type="application/pdf",
+        content_type="text/plain",
         metadata={"source": "upload"},
     )
 
