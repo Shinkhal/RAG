@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
@@ -62,7 +63,7 @@ async def init_db() -> None:
     """Initialize database connection, extensions, and tables."""
     logger.info("Starting database initialization...")
     try:
-        check_connection()
+        await asyncio.to_thread(check_connection)
         logger.info("Database connection verified.")
 
         # Import models here to ensure they are registered with Base.metadata
@@ -70,25 +71,28 @@ async def init_db() -> None:
 
         logger.info("Models imported, starting sync connection...")
 
-        with sync_engine.begin() as conn:
-            logger.info("Sync connection established, creating extensions...")
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+        def _sync_setup() -> None:
+            with sync_engine.begin() as conn:
+                logger.info("Sync connection established, creating extensions...")
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
 
-            # Run manual migrations if they exist
-            if MIGRATIONS_DIR.exists():
-                logger.info(f"Running migrations from {MIGRATIONS_DIR}...")
-                migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
-                for sql_file in migration_files:
-                    logger.info(f"Executing migration: {sql_file.name}")
-                    sql_content = sql_file.read_text(encoding="utf-8")
-                    statements = _split_sql_statements(sql_content)
-                    for stmt in statements:
-                        conn.exec_driver_sql(stmt)
+                # Run manual migrations if they exist
+                if MIGRATIONS_DIR.exists():
+                    logger.info(f"Running migrations from {MIGRATIONS_DIR}...")
+                    migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
+                    for sql_file in migration_files:
+                        logger.info(f"Executing migration: {sql_file.name}")
+                        sql_content = sql_file.read_text(encoding="utf-8")
+                        statements = _split_sql_statements(sql_content)
+                        for stmt in statements:
+                            conn.exec_driver_sql(stmt)
 
-        logger.info("Extensions and migrations verified, creating tables...")
-        # Create all tables defined in models (that might not be in migrations)
-        Base.metadata.create_all(sync_engine)
+            logger.info("Extensions and migrations verified, creating tables...")
+            # Create all tables defined in models (that might not be in migrations)
+            Base.metadata.create_all(sync_engine)
+
+        await asyncio.to_thread(_sync_setup)
 
         logger.info("✅ Database initialized (extensions, migrations and tables verified)")
     except Exception as e:

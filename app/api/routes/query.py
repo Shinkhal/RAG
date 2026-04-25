@@ -8,10 +8,11 @@ from app.clients.redis_cache import redis_cache
 from app.config.env_config import get_settings
 from app.db import get_session
 from app.repositories.supabase_repo import SupabaseRepo
-from app.schemas.query import QueryMetadata, QueryRequest, QueryResponse
+from app.schemas.query import ExternalSearchResult, QueryMetadata, QueryRequest, QueryResponse
+from app.services.external_knowledge import get_external_knowledge
 from app.services.generation import generate_answer
 from app.services.personas import build_persona_prompt_config
-from app.services.retrieval import _topic_overlap, retrieve_chunks
+from app.services.retrieval import retrieve_chunks
 
 router = APIRouter()
 
@@ -48,7 +49,7 @@ async def query_rag(
     )
     document_ids = request.filters.get("doc_ids") if request.filters else None
 
-    chunks_with_scores = await retrieve_chunks(
+    chunks_result = await retrieve_chunks(
         query=request.query,
         user_id=request.user_id,
         session_id=request.session_id,
@@ -57,15 +58,17 @@ async def query_rag(
         min_score=min_score,
         document_ids=document_ids,
     )
-
+    chunks_with_scores = chunks_result.chunks
+    force_general = chunks_result.low_confidence
     top_score = chunks_with_scores[0][1] if chunks_with_scores else None
     confidence = top_score
 
-    if chunks_with_scores:
-        top_topic = _topic_overlap(chunks_with_scores[0][0]["content"], request.query)
-        force_general = top_topic < FALLBACK_TOPIC_THRESHOLD
-    else:
-        force_general = True
+    external_results: list[ExternalSearchResult] = []
+    if request.enable_external_knowledge:
+        context_chunks = [
+            {"doc_name": chunk[0]["metadata"].get("filename", "")} for chunk in chunks_with_scores
+        ]
+        external_results, _ = await get_external_knowledge(request.query, context_chunks)
 
     persona_payload = None
     if request.persona:
@@ -76,13 +79,14 @@ async def query_rag(
             )
         persona_payload = build_persona_prompt_config(persona, request.persona.intensity)
 
-    answer, sources, llm_details = await generate_answer(
+    answer, sources, llm_details, _ = await generate_answer(
         query=request.query,
         chunks=chunks_with_scores,
         subscription_tier=request.subscription_tier,
         persona_config=persona_payload,
         stream=False,
         force_general=force_general,
+        external_results=external_results,
     )
 
     processing_time_ms = int((time.time() - start_time) * 1000)
@@ -103,6 +107,7 @@ async def query_rag(
         answer=answer,
         sources=sources,
         metadata=metadata,
+        external_results=external_results,
     )
 
     await redis_cache.cache_query_result(
@@ -156,7 +161,7 @@ async def query_rag_stream(
     )
     document_ids = request.filters.get("doc_ids") if request.filters else None
 
-    chunks_with_scores = await retrieve_chunks(
+    chunks_result = await retrieve_chunks(
         query=request.query,
         user_id=request.user_id,
         session_id=request.session_id,
@@ -165,36 +170,43 @@ async def query_rag_stream(
         min_score=min_score,
         document_ids=document_ids,
     )
-
+    chunks_with_scores = chunks_result.chunks
+    force_general = chunks_result.low_confidence
     top_score = chunks_with_scores[0][1] if chunks_with_scores else None
     confidence = top_score
 
-    if chunks_with_scores:
-        top_topic = _topic_overlap(chunks_with_scores[0][0]["content"], request.query)
-        force_general = top_topic < FALLBACK_TOPIC_THRESHOLD
-    else:
-        force_general = True
+    external_results: list[ExternalSearchResult] = []
+    if request.enable_external_knowledge:
+        context_chunks = [
+            {"doc_name": chunk[0]["metadata"].get("filename", "")} for chunk in chunks_with_scores
+        ]
+        external_results, _ = await get_external_knowledge(request.query, context_chunks)
 
     async def event_stream():
         import json
 
         yield f"data: {json.dumps({'type': 'status', 'message': 'Retrieving context...'})}\n\n"
         yield f"data: {json.dumps({'type': 'retrieval', 'chunks_found': len(chunks_with_scores)})}\n\n"
+        if external_results:
+            yield f"data: {json.dumps({'type': 'external_search', 'results_count': len(external_results)})}\n\n"
         yield f"data: {json.dumps({'type': 'generation_start'})}\n\n"
 
-        answer, sources, llm_details = await generate_answer(
+        answer, sources, llm_details, _ = await generate_answer(
             query=request.query,
             chunks=chunks_with_scores,
             subscription_tier=request.subscription_tier,
             persona_config=persona_payload,
             stream=True,
             force_general=force_general,
+            external_results=external_results,
         )
 
         async for token in answer:
             yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
 
         yield f"data: {json.dumps({'type': 'sources', 'sources': [s.model_dump() for s in sources]})}\n\n"
+        if external_results:
+            yield f"data: {json.dumps({'type': 'external_results', 'results': [r.model_dump() for r in external_results]})}\n\n"
         yield f"data: {json.dumps({'type': 'metadata', 'data': {'llm_used': llm_details['model'], 'subscription_tier': request.subscription_tier, 'persona_applied': request.persona.persona_id if request.persona else None, 'persona_intensity': request.persona.intensity if request.persona else None, 'cached': False, 'confidence': confidence, 'general_fallback': force_general}})}\n\n"
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 

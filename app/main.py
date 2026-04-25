@@ -68,6 +68,7 @@ app = FastAPI(
         ),
         Middleware(
             RateLimitMiddleware,
+            exclude_paths=["/api/v1/ingest"],
         ),
         Middleware(RequestLoggingMiddleware),
     ],

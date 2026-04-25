@@ -1,3 +1,4 @@
+import copy
 import re
 from typing import Any
 
@@ -17,7 +18,7 @@ def sanitize_context(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         text = chunk.get("content", "")
         for pattern in BANNED_PATTERNS:
             text = re.sub(pattern, "[FILTERED]", text, flags=re.IGNORECASE)
-        sanitized.append({**chunk, "content": text})
+        sanitized.append({**copy.deepcopy(chunk), "content": text})
     return sanitized
 
 

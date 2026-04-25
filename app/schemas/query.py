@@ -3,6 +3,12 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class ExternalSearchResult(BaseModel):
+    title: str
+    url: str
+    snippet: str
+
+
 class SourceReference(BaseModel):
     doc_id: str
     doc_name: str | None = None
@@ -24,6 +30,7 @@ class QueryRequest(BaseModel):
     subscription_tier: str = "free"
     filters: dict[str, Any] | None = None
     config: dict[str, Any] | None = None
+    enable_external_knowledge: bool = Field(default=False, description="Enable internet search to supplement document context")
 
 
 class QueryMetadata(BaseModel):
@@ -42,6 +49,7 @@ class QueryResponse(BaseModel):
     answer: str
     sources: list[SourceReference]
     metadata: QueryMetadata
+    external_results: list[ExternalSearchResult] = Field(default_factory=list, description="Web search results if external knowledge is enabled")
 
 
 class StreamingToken(BaseModel):
@@ -61,3 +69,9 @@ class StreamingMetadata(BaseModel):
 
 class StreamingDone(BaseModel):
     type: str = "done"
+
+
+class ExternalKnowledgeContext(BaseModel):
+    has_external_context: bool = False
+    results: list[ExternalSearchResult] = Field(default_factory=list)
+    summary: str | None = None

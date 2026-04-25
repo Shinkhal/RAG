@@ -341,12 +341,28 @@ class EnvSettings:
         return optional("LOG_LEVEL", "INFO")
 
     @property
+    def tavily_api_key(self) -> str:
+        return optional("TAVILY_API_KEY")
+
+    @property
     def max_pdf_size_mb(self) -> int:
         return number("MAX_PDF_SIZE_MB", 10)
 
     @property
     def max_pdf_uploads_per_hour(self) -> int:
         return number("MAX_PDF_UPLOADS_PER_HOUR", 20)
+
+    @property
+    def rate_limit_tier_max(self) -> dict[str, int]:
+        return {
+            "free": number("RATE_LIMIT_FREE", 50),
+            "pro": number("RATE_LIMIT_PRO", 500),
+            "enterprise": number("RATE_LIMIT_ENTERPRISE", -1),
+        }
+
+    @property
+    def rate_limit_window_seconds(self) -> int:
+        return number("RATE_LIMIT_WINDOW_SECONDS", 60)
 
 
 def get_settings() -> EnvSettings:

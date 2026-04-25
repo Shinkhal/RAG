@@ -11,6 +11,7 @@ class IngestRequest(BaseModel):
 
 class IngestResponse(BaseModel):
     document_id: str
+    job_id: str | None = None
     status: str
     chunks_created: int = 0
     processing_time_ms: int | None = None

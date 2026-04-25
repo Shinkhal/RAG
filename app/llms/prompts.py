@@ -1,5 +1,7 @@
 from typing import Any
 
+from app.schemas.query import ExternalSearchResult
+
 
 def _render_style_rules(style_config: dict[str, Any]) -> str:
     system_prompt = style_config.get("system_prompt")
@@ -55,12 +57,28 @@ def _build_context(context_chunks: list[dict[str, Any]], query: str) -> str:
 
     return "\n\n".join(sections)
 
+
+def _build_external_context(external_results: list[ExternalSearchResult]) -> str:
+    if not external_results:
+        return ""
+
+    sections = ["\n\n-- EXTERNAL KNOWLEDGE (from the internet) --\n"]
+    for i, result in enumerate(external_results, 1):
+        sections.append(f"\n{i}. {result.title}")
+        sections.append(f"   Source: {result.url}")
+        sections.append(f"   {result.snippet}")
+
+    return "\n".join(sections)
+
+
 def build_grounded_prompts(
     query: str,
     context_chunks: list[dict[str, Any]],
     persona_config: dict[str, Any] | None = None,
+    external_results: list[ExternalSearchResult] | None = None,
 ) -> tuple[str, str]:
     context = _build_context(context_chunks, query)
+    external_context = _build_external_context(external_results or [])
 
     system_prompt = """
 You are a scientific document assistant.
@@ -98,6 +116,16 @@ Sources:
 - [document_name | page X | #chunk_id]
 """
 
+    if external_results:
+        system_prompt += """
+
+EXTERNAL KNOWLEDGE SECTION (if present):
+- The external knowledge section provides supplementary information from the internet
+- Use this to provide additional context or explanations beyond the documents
+- Cite external sources using: [source: URL]
+- Distinguish between document-based answers and external knowledge
+"""
+
     if persona_config:
         intensity = persona_config.get("intensity", 0.7)
         persona_name = persona_config.get("name", "a helpful assistant")
@@ -118,7 +146,7 @@ STYLE RULES:
 """
 
     user_prompt = f"""Context:
-{context}
+{context}{external_context}
 
 Question:
 {query}

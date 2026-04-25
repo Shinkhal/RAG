@@ -114,6 +114,19 @@ class RedisCache:
             return None
         return json.loads(value)
 
+    async def get_raw(self, key: str) -> str | None:
+        if self._mode == "rest":
+            encoded_key = quote(key, safe="")
+            response = await self._http_client.get(f"{self._rest_url}/get/{encoded_key}")
+            response.raise_for_status()
+            payload = response.json()
+            result = payload.get("result")
+            return result if result else None
+
+        if not self._client:
+            return None
+        return await self._client.get(key)
+
     async def set(self, key: str, value: dict[str, Any], ttl_seconds: int | None = None) -> None:
         ttl = ttl_seconds or self._default_ttl
         if self._mode == "rest":

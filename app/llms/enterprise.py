@@ -5,6 +5,7 @@ import httpx
 from app.config.env_config import get_settings
 from app.llms.base import BaseLLMClient
 from app.llms.prompts import build_grounded_prompts
+from app.schemas.query import ExternalSearchResult
 
 
 class EnterpriseTierAnthropicLLM(BaseLLMClient):
@@ -71,8 +72,9 @@ class EnterpriseTierAnthropicLLM(BaseLLMClient):
         context_chunks: list[dict[str, Any]],
         persona_config: dict[str, Any] | None = None,
         stream: bool = False,
+        external_results: list[ExternalSearchResult] | None = None,
     ) -> str | AsyncIterator[str]:
-        system_prompt, user_prompt = build_grounded_prompts(query, context_chunks, persona_config)
+        system_prompt, user_prompt = build_grounded_prompts(query, context_chunks, persona_config, external_results)
         if stream:
             return self._generate_stream(user_prompt, system_prompt)
         return await self._generate(user_prompt, system_prompt)

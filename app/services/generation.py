@@ -1,7 +1,7 @@
 from typing import Any, AsyncIterator
 
 from app.llms.router import get_tier_llm_client
-from app.schemas.query import SourceReference
+from app.schemas.query import ExternalSearchResult, SourceReference
 
 
 async def generate_answer(
@@ -11,7 +11,8 @@ async def generate_answer(
     persona_config: dict[str, Any] | None = None,
     stream: bool = False,
     force_general: bool = False,
-) -> tuple[str | AsyncIterator[str], list[SourceReference], dict[str, str]]:
+    external_results: list[ExternalSearchResult] | None = None,
+) -> tuple[str | AsyncIterator[str], list[SourceReference], dict[str, str], list[ExternalSearchResult]]:
     llm_client = get_tier_llm_client(subscription_tier)
 
     if not chunks:
@@ -45,6 +46,7 @@ async def generate_answer(
             "I don't have enough information in the provided documents about this topic.",
             [],
             {"provider": llm_client.provider, "model": llm_client.model_name},
+            external_results or [],
         )
 
     if stream:
@@ -53,14 +55,16 @@ async def generate_answer(
             context_chunks=context_chunks,
             persona_config=persona_config,
             stream=True,
+            external_results=external_results,
         )
-        return result, sources, {"provider": llm_client.provider, "model": llm_client.model_name}
+        return result, sources, {"provider": llm_client.provider, "model": llm_client.model_name}, external_results or []
 
     answer = await llm_client.grounded_answer(
         query=query,
         context_chunks=context_chunks,
         persona_config=persona_config,
         stream=False,
+        external_results=external_results,
     )
 
-    return answer, sources, {"provider": llm_client.provider, "model": llm_client.model_name}
+    return answer, sources, {"provider": llm_client.provider, "model": llm_client.model_name}, external_results or []

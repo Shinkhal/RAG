@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
 
+from app.schemas.query import ExternalSearchResult
+
 
 class BaseLLMClient(ABC):
     provider: str
@@ -13,6 +15,7 @@ class BaseLLMClient(ABC):
         context_chunks: list[dict[str, Any]],
         persona_config: dict[str, Any] | None = None,
         stream: bool = False,
+        external_results: list[ExternalSearchResult] | None = None,
     ) -> str | AsyncIterator[str]:
         raise NotImplementedError
 

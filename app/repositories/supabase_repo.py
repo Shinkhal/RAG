@@ -67,16 +67,7 @@ class SupabaseRepo:
     ) -> list[tuple[Chunk, float]]:
         embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
 
-        query = text("""
-            SELECT c.*, 1 - (c.embedding <=> CAST(:embedding AS vector)) as score
-            FROM chunks c
-            WHERE c.user_id = :user_id
-            AND c.session_id = :session_id
-            AND 1 - (c.embedding <=> CAST(:embedding AS vector)) >= :min_score
-            ORDER BY c.embedding <=> CAST(:embedding AS vector)
-            LIMIT :limit
-        """)
-
+        doc_filter = ""
         params = {
             "embedding": embedding_str,
             "user_id": user_id,
@@ -86,26 +77,41 @@ class SupabaseRepo:
         }
 
         if document_ids:
-            doc_list = ",".join(f"'{d}'" for d in document_ids)
-            query = text(f"""
-                SELECT c.*, 1 - (c.embedding <=> CAST(:embedding AS vector)) as score
-                FROM chunks c
-                WHERE c.user_id = :user_id
-                AND c.session_id = :session_id
-                AND c.document_id IN ({doc_list})
-                AND 1 - (c.embedding <=> CAST(:embedding AS vector)) >= :min_score
-                ORDER BY c.embedding <=> CAST(:embedding AS vector)
-                LIMIT :limit
-            """)
+            doc_ids_tuple = tuple(document_ids)
+            for i, doc_id in enumerate(doc_ids_tuple):
+                params[f"doc_id_{i}"] = doc_id
+            doc_placeholders = ", ".join([f":doc_id_{i}" for i in range(len(document_ids))])
+            doc_filter = f"AND c.document_id IN ({doc_placeholders})"
 
-        result = await self.session.execute(query, params)
+        query_str = f"""
+            SELECT c.id, c.document_id, c.session_id, c.user_id, c.chunk_idx, c.content, c.embedding, c.metadata, c.created_at,
+                   1 - (c.embedding <=> CAST(:embedding AS vector)) as score
+            FROM chunks c
+            WHERE c.user_id = :user_id
+            AND c.session_id = :session_id
+            {doc_filter}
+            AND 1 - (c.embedding <=> CAST(:embedding AS vector)) >= :min_score
+            ORDER BY c.embedding <=> CAST(:embedding AS vector)
+            LIMIT :limit
+        """
+
+        result = await self.session.execute(text(query_str), params)
         rows = result.fetchall()
 
         chunks_with_scores = []
         for row in rows:
-            chunk = await self.session.get(Chunk, row.id)
-            if chunk:
-                chunks_with_scores.append((chunk, row.score))
+            chunk = Chunk(
+                id=row.id,
+                document_id=row.document_id,
+                session_id=row.session_id,
+                user_id=row.user_id,
+                chunk_idx=row.chunk_idx,
+                content=row.content,
+                embedding=row.embedding,
+                metadata_=row.metadata,
+                created_at=row.created_at,
+            )
+            chunks_with_scores.append((chunk, row.score))
 
         return chunks_with_scores
 

@@ -119,7 +119,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "if (pm.response.code === 200) {",
+                  "if (pm.response.code === 202) {",
                   "  var json = pm.response.json();",
                   "  pm.collectionVariables.set('document_id', json.document_id);",
                   "  pm.collectionVariables.set('job_id', json.document_id);",
@@ -209,6 +209,18 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"query\": \"Summarize the key findings\",\n  \"user_id\": \"{{user_id}}\",\n  \"session_id\": \"{{session_id}}\",\n  \"subscription_tier\": \"free\",\n  \"filters\": {\n    \"doc_ids\": [\"{{document_id}}\"]\n  },\n  \"config\": {\n    \"top_k\": 3,\n    \"min_score\": 0.6\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Query – with external knowledge",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/rag/query",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"What are the latest developments in AI?\",\n  \"user_id\": \"{{user_id}}\",\n  \"session_id\": \"{{session_id}}\",\n  \"subscription_tier\": \"pro\",\n  \"enable_external_knowledge\": true\n}"
             }
           }
         },
