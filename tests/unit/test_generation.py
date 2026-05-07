@@ -1,9 +1,14 @@
 """Unit tests for the LLM prompt building and routing logic."""
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
 from app.llms.prompts import _build_context, _render_style_rules, build_grounded_prompts
 from app.llms.router import LLMTierConfig, get_llm_config
+from app.schemas.query import ExternalSearchResult
+from app.services.generation import generate_answer
 
 
 # ── _render_style_rules ───────────────────────────────────────────
@@ -62,6 +67,14 @@ class TestBuildContext:
     def test_empty_chunks(self) -> None:
         result = _build_context([], "test query")
         assert "No relevant documents found" in result
+
+    def test_missing_doc_name_falls_back_to_doc_id(self) -> None:
+        chunks = [
+            {"content": "quantum data", "doc_id": "doc-123", "chunk_idx": 7, "page": 2},
+        ]
+        result = _build_context(chunks, "quantum")
+        assert "doc-123" in result
+        assert "#7" in result
 
     def test_categorizes_relevant_vs_weak(self) -> None:
         chunks = [
@@ -126,8 +139,6 @@ class TestBuildGroundedPrompts:
         assert "PERSONA TRANSFORMATION" not in system
 
     def test_external_results_add_section(self) -> None:
-        from app.schemas.query import ExternalSearchResult
-
         external = [
             ExternalSearchResult(title="Wiki", url="https://example.com", snippet="Info")
         ]
@@ -137,6 +148,69 @@ class TestBuildGroundedPrompts:
             external_results=external,
         )
         assert "EXTERNAL KNOWLEDGE" in system
+
+
+class TestGenerateAnswer:
+    @pytest.mark.asyncio
+    async def test_uses_llm_when_external_results_exist_even_if_low_confidence(self, monkeypatch) -> None:
+        llm_client = SimpleNamespace(
+            provider="gemini",
+            model_name="gemini-test",
+            grounded_answer=AsyncMock(return_value="Digestive system answer"),
+        )
+        monkeypatch.setattr("app.services.generation.get_tier_llm_client", lambda _tier: llm_client)
+
+        chunks = [
+            (
+                {
+                    "content": "Digestive system breaks down food.",
+                    "doc_id": "doc-1",
+                    "metadata": {"filename": "biology.pdf", "page": 1},
+                },
+                0.72,
+            )
+        ]
+        external = [
+            ExternalSearchResult(
+                title="Digestive system",
+                url="https://example.com/digestive",
+                snippet="The digestive system breaks down food into nutrients.",
+            )
+        ]
+
+        answer, sources, llm_details, returned_external = await generate_answer(
+            query="What is Digestive Systems?",
+            chunks=chunks,
+            force_general=False,
+            external_results=external,
+        )
+
+        assert answer == "Digestive system answer"
+        assert len(sources) == 1
+        assert llm_details["model"] == "gemini-test"
+        assert returned_external == external
+        llm_client.grounded_answer.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_force_general_returns_canned_fallback(self, monkeypatch) -> None:
+        llm_client = SimpleNamespace(
+            provider="gemini",
+            model_name="gemini-test",
+            grounded_answer=AsyncMock(),
+        )
+        monkeypatch.setattr("app.services.generation.get_tier_llm_client", lambda _tier: llm_client)
+
+        answer, sources, _, returned_external = await generate_answer(
+            query="Unknown topic",
+            chunks=[],
+            force_general=True,
+            external_results=[],
+        )
+
+        assert answer == "I don't have enough information in the provided documents about this topic."
+        assert sources == []
+        assert returned_external == []
+        llm_client.grounded_answer.assert_not_awaited()
 
 
 # ── get_llm_config ────────────────────────────────────────────────

@@ -12,9 +12,6 @@ env/
 # IDE
 .idea/
 
-# Environment variables
-.env
-
 # Testing
 .pytest_cache/
 
@@ -36,3 +33,8 @@ build/
 # Documentation & PRDs (Dev focused)
 NONE/
 rag.zip
+
+.agents/
+.claude/
+.junie/
+.qwen

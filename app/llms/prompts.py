@@ -43,7 +43,18 @@ def _build_context(context_chunks: list[dict[str, Any]], query: str) -> str:
     for chunk in context_chunks:
         chunk_text = chunk["content"].lower()
         overlap = query_words & {w for w in chunk_text.split() if len(w) > 3}
-        entry = f"[{chunk['doc_name']} | page {chunk.get('page', 'N/A')} | #{chunk.get('chunk_id', '?')}]\n{chunk['content']}"
+
+        doc_name = (
+            chunk.get("doc_name")
+            or chunk.get("doc_title")
+            or chunk.get("document_name")
+            or chunk.get("title")
+            or chunk.get("doc_id")
+            or chunk.get("document_id")
+            or "unknown-document"
+        )
+        chunk_id = chunk.get("chunk_id", chunk.get("chunk_idx", "?"))
+        entry = f"[{doc_name} | page {chunk.get('page', 'N/A')} | #{chunk_id}]\n{chunk['content']}"
         if overlap:
             relevant.append(entry)
         else:
@@ -152,5 +163,56 @@ Question:
 {query}
 
 Follow all rules strictly and produce the final answer."""
+
+    return system_prompt.strip(), user_prompt.strip()
+
+
+def build_summary_prompt(
+    query: str,
+    summary_type: str = "document",  # "document", "session", "chapter"
+    persona_config: dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    """Build prompts for document summarization."""
+
+    system_prompt = """You are a document summarization assistant.
+
+TASK: Create a clear, comprehensive summary.
+
+GUIDELINES:
+1. Extract main ideas, key findings, and important details
+2. Maintain document structure (Intro → Body → Conclusion)
+3. Preserve numerical data, dates, proper nouns
+4. Keep it factual - do NOT add outside knowledge
+5. Length: ~10-15% of original text
+
+FORMAT:
+## Summary
+[Concise 2-3 sentence overview]
+
+## Key Points
+- [Point 1]
+- [Point 2]
+...
+
+## Important Details
+[Critical data, dates, specifics if any]
+"""
+
+    if persona_config:
+        intensity = persona_config.get("intensity", 0.7)
+        persona_name = persona_config.get("name", "a helpful assistant")
+        persona_rules = _render_style_rules(persona_config.get("style_config", {}))
+        system_prompt += f"""
+PERSONA STYLE:
+Rewrite the summary in the style of {persona_name} (intensity: {intensity:.2f}):
+{persona_rules}
+"""
+
+    user_prompt = f"""Document Context:
+{{context}}
+
+Task: {query}
+
+Follow the format above and produce the summary."""
 
     return system_prompt.strip(), user_prompt.strip()

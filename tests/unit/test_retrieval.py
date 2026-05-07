@@ -5,6 +5,7 @@ import pytest
 from app.services.retrieval import (
     _deduplicate_chunks,
     _keyword_boost,
+    _has_strong_lexical_signal,
     _parse_query_words,
     _topic_overlap,
 )
@@ -71,6 +72,18 @@ class TestTopicOverlap:
         assert overlap == pytest.approx(0.5)
 
 
+class TestLexicalSignal:
+    def test_detects_strong_match(self) -> None:
+        query_words = {"digestive", "system", "breaks", "food", "nutrients"}
+        text = "The digestive system breaks down food into nutrients."
+        assert _has_strong_lexical_signal(text, query_words)
+
+    def test_rejects_weak_match(self) -> None:
+        query_words = {"digestive", "system", "breaks", "food", "nutrients"}
+        text = "Human biology overview."
+        assert not _has_strong_lexical_signal(text, query_words)
+
+
 # ── _parse_query_words ────────────────────────────────────────────
 
 
@@ -79,7 +92,7 @@ class TestParseQueryWords:
         words = _parse_query_words("What is quantum physics")
         assert "quantum" in words
         assert "physics" in words
-        assert "what" in words
+        assert "what" not in words
 
     def test_excludes_short_words(self) -> None:
         words = _parse_query_words("a is of quantum")
@@ -95,6 +108,11 @@ class TestParseQueryWords:
 
     def test_empty_query(self) -> None:
         assert _parse_query_words("") == set()
+
+    def test_strips_punctuation(self) -> None:
+        words = _parse_query_words("What is Digestive Systems?")
+        assert "digestive" in words
+        assert "systems" in words
 
 
 # ── _deduplicate_chunks ──────────────────────────────────────────

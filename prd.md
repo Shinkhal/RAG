@@ -581,11 +581,132 @@ RAG/
 - [x] Bulk document deletion
 - [x] Query logging to database
 
+### ✅ Context Memory & Summarization (Phase 1)
+- [x] Document context caching during ingestion (Redis)
+- [x] Summary request detection ("Summarize", "TL;DR", "Brief overview")
+- [x] Summary prompt builder with persona styling
+- [x] Supports "Summarize this document", "Key points", chapter summaries
+
+### ✅ RAG Optimizations (Phase 2)
+- [x] **BM25 Keyword Search** - Lexical fallback alongside vector similarity
+- [x] **Reciprocal Rank Fusion** - Combines vector + BM25 scores
+- [x] **Query Rewriting** - LLM-based query expansion (configurable)
+- [x] **Cross-Encoder Reranking** - `ms-marco-MiniLM-L-6-v2` for better relevance
+- [x] **Parent Document Retrieval** - Fetch surrounding chunks for richer context
+
 ### Not Yet Implemented ❌
 
 - [ ] Multi-persona conversations
 - [ ] Persona mixing (e.g., Einstein 70% + Feynman 30%)
 - [ ] Voice synthesis
+- [ ] Analytics dashboard
+- [ ] Reindex endpoint (placeholder exists)
+- [ ] Full integration test suite (120+ unit tests passing)
+
+---
+
+## 📊 Success Metrics
+
+### Retrieval Quality
+
+- **Hybrid scoring** (cosine + BM25 keyword + topic overlap)
+- **Reciprocal Rank Fusion** (RRF) for combining multiple signals
+- **Cross-Encoder reranking** for improved relevance
+- **Low-confidence detection** with configurable threshold
+- **Deduplication** of near-identical chunks
+- **Query rewriting** for ambiguous queries
+
+### Performance
+
+- Configurable `DEFAULT_TOP_K` (default 5)
+- 4× oversampling for better recall
+- Redis query caching (default 1h TTL)
+- Batch embedding with rate-limit retry
+- **Context memory caching** for instant summarization
+
+### Observability
+
+- Query logs persisted to PostgreSQL
+- Request logging middleware
+- Structured health checks
+- Configurable `LOG_LEVEL`
+- **120+ unit tests passing**, Ruff linting clean
+
+---
+
+## ⚡ Key Configuration (Environment Variables)
+
+| Variable                       | Default                         | Description                    |
+| ------------------------------ | ------------------------------- | ------------------------------ |
+| `DATABASE_URL`                 | required                        | PostgreSQL connection string   |
+| `GEMINI_API_KEY`               | required                        | Google Gemini API key          |
+| `OPENAI_API_KEY`               | optional                        | OpenAI API key (pro tier)      |
+| `ANTHROPIC_API_KEY`            | optional                        | Anthropic key (enterprise)     |
+| `UPSTASH_REDIS_REST_URL`       | optional                        | Upstash Redis REST endpoint    |
+| `UPSTASH_REDIS_REST_TOKEN`     | optional                        | Upstash Redis auth token       |
+| `CLOUDINARY_CLOUD_NAME`        | optional                        | Cloudinary cloud name          |
+| `CLOUDINARY_API_KEY`           | optional                        | Cloudinary API key             |
+| `CLOUDINARY_API_SECRET`        | optional                        | Cloudinary API secret          |
+| `TAVILY_API_KEY`               | optional                        | Tavily search API key          |
+| `FREE_TIER_MODEL`              | `gemini-2.5-flash`              | Free tier LLM model            |
+| `PRO_TIER_MODEL`               | `gpt-4o-mini`                   | Pro tier LLM model             |
+| `ENTERPRISE_TIER_MODEL`        | `claude-3-5-sonnet-20241022`    | Enterprise tier LLM model      |
+| `EMBEDDING_MODEL`              | `gemini-embedding-2`            | Embedding model name           |
+| `EMBEDDING_OUTPUT_DIMENSIONALITY` | `768`                        | Embedding vector dimensions    |
+| `MAX_CHUNK_SIZE`               | `500`                           | Max chars per chunk            |
+| `CHUNK_OVERLAP`                | `20`                            | Overlap chars between chunks   |
+| `EMBEDDING_BATCH_SIZE`         | `100`                           | Batch size for embedding calls |
+| `DEFAULT_TOP_K`                | `5`                             | Default retrieval top-k        |
+| `MIN_RETRIEVAL_SCORE`          | `0.5`                           | Min cosine similarity score    |
+| `QUERY_CACHE_TTL_SECONDS`      | `3600`                          | Redis query cache TTL          |
+| `MAX_PDF_SIZE_MB`              | `10`                            | Max upload file size           |
+| `MAX_PDF_UPLOADS_PER_HOUR`     | `20`                            | Upload rate limit              |
+| `APP_ENV`                      | `development`                   | App environment                |
+| `LOG_LEVEL`                    | `INFO`                          | Logging level                  |
+| `PORT`                         | `8000`                          | Server port                    |
+
+### Feature Flags (New in Phase 2-3)
+
+| Variable                       | Default | Description                    |
+| ------------------------------ | ------- | ------------------------------ |
+| `ENABLE_BM25`              | `true`  | Enable BM25 keyword search     |
+| `ENABLE_QUERY_REWRITING`    | `false` | Enable LLM query rewriting    |
+| `ENABLE_RERANKING`        | `false` | Enable cross-encoder reranking|
+| `ENABLE_PARENT_CONTEXT`    | `false` | Fetch parent document context |
+| `PARENT_CONTEXT_WINDOW`    | `2`     | Chunks before/after each result |
+
+---
+
+## 🎓 Design Principles
+
+> **1. Grounding > Style** — Persona never distorts facts.
+> **2. Single-Pass Generation** — Persona + grounding in one LLM call for lower latency
+> **3. Transparent Attribution** — Clear source citations with doc name, page, chunk ID
+> **4. Tier Fairness** — Free tier is fully functional with all personas
+> **5. Observable** — Query logs, request logging, health checks, 120+ tests
+> **6. Defensive** — Prompt injection sanitization on all retrieved context
+> **7. Hybrid Retrieval** — Vector + BM25 + RRF + reranking for robustness
+
+---
+
+## ✅ Definition of Done (Current State)
+
+- [x] User can upload PDFs, TXT, MD, CSV
+- [x] Chat works with session-scoped context
+- [x] 6 personas available (all tiers)
+- [x] Responses are grounded with citations
+- [x] Streaming responses work via SSE
+- [x] Rate limiting enforced
+- [x] Query caching operational
+- [x] Multi-LLM routing functional
+- [x] Health check covers all services
+- [x] **Context memory for document summarization**
+- [x] **BM25 keyword search + RRF**
+- [x] **Query rewriting with LLM**
+- [x] **Cross-encoder reranking**
+- [x] **Parent document retrieval**
+- [x] **120+ unit tests passing**, Ruff linting clean
+- [ ] Production deployment on Railway
 - [ ] Analytics dashboard
 - [ ] Reindex endpoint (placeholder exists)
 - [ ] Full test suite (scaffolded only)

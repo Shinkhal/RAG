@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import os
 import asyncio
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
 
-from app.config.env_config import get_settings
+from app.config.env_config import get_settings, optional
 from app.utils.logger import logger
 
 settings = get_settings()
@@ -16,11 +17,13 @@ DATABASE_URL = settings.database_url
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "db" / "migrations"
 
-# Sync engine for initial setup and health checks
+# Sync engine for initial setup and health checks (always NullPool)
 sync_engine = create_engine(DATABASE_URL, poolclass=NullPool)
 
 # Async engine for the main application logic
-# We disable prepared statement cache for compatibility with PgBouncer-style proxies
+# Use NullPool for serverless/PgBouncer by default in test/dev environments
+USE_NULL_POOL = os.getenv("DATABASE_NULL_POOL", "true").lower() == "true"
+
 ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
 if "prepared_statement_cache_size" not in ASYNC_DATABASE_URL:
     if "?" in ASYNC_DATABASE_URL:
@@ -28,7 +31,23 @@ if "prepared_statement_cache_size" not in ASYNC_DATABASE_URL:
     else:
         ASYNC_DATABASE_URL += "?prepared_statement_cache_size=0"
 
-engine = create_async_engine(ASYNC_DATABASE_URL, poolclass=NullPool)
+if USE_NULL_POOL:
+    engine = create_async_engine(ASYNC_DATABASE_URL, poolclass=NullPool)
+else:
+    pool_size = int(optional("DATABASE_POOL_SIZE", "5"))
+    max_overflow = int(optional("DATABASE_MAX_OVERFLOW", "10"))
+    pool_timeout = int(optional("DATABASE_POOL_TIMEOUT", "30"))
+    pool_recycle = int(optional("DATABASE_POOL_RECYCLE", "1800"))
+    
+    engine = create_async_engine(
+        ASYNC_DATABASE_URL,
+        poolclass=AsyncAdaptedQueuePool,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        pool_timeout=pool_timeout,
+        pool_recycle=pool_recycle,
+        pool_pre_ping=True,
+    )
 
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

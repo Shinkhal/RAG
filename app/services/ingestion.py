@@ -132,6 +132,33 @@ async def process_ingest_job(
                 chunk_records.append(record)
 
         await repo.upsert_chunks(chunk_records)
+
+        # Build and cache document context for summarization
+        from app.clients.redis_cache import redis_cache
+        import json
+
+        # Build full text from chunks
+        full_text = "\n\n".join(c.content for c in chunk_records)
+
+        # Build page mapping if available
+        pages = []
+        if "page" in chunk_records[0].metadata:
+            pages = [
+                {"page": c.metadata.get("page"), "chunk_idx": i}
+                for i, c in enumerate(chunk_records)
+                if c.metadata.get("page")
+            ]
+
+        context = {
+            "document_id": document_id,
+            "filename": filename,
+            "full_text": full_text,
+            "chunk_count": len(chunk_records),
+            "pages": pages,
+            "created_at": __import__("datetime").datetime.utcnow().isoformat(),
+        }
+
+        await redis_cache.set_document_context(document_id, context)
     except Exception:
         with suppress(Exception):
             await cloudinary_storage_client.delete_document_asset(storage_metadata)

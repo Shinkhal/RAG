@@ -144,8 +144,19 @@ class GeminiClient:
         persona_config: dict[str, Any] | None = None,
         stream: bool = False,
     ) -> str | AsyncIterator[str]:
+        def _label(chunk: dict[str, Any]) -> str:
+            return (
+                chunk.get("doc_name")
+                or chunk.get("doc_title")
+                or chunk.get("document_name")
+                or chunk.get("title")
+                or chunk.get("doc_id")
+                or chunk.get("document_id")
+                or "unknown-document"
+            )
+
         context = "\n\n".join(
-            f"[{chunk['doc_name']} page {chunk.get('page', 'N/A')}]: {chunk['content']}"
+            f"[{_label(chunk)} page {chunk.get('page', 'N/A')}]: {chunk['content']}"
             for chunk in context_chunks
         )
 

@@ -120,6 +120,35 @@ class SupabaseRepo:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_all_document_chunks(
+        self, document_id: str, user_id: str
+    ) -> list[Chunk]:
+        """Get ALL chunks for a document, ordered by chunk_idx."""
+        stmt = (
+            select(Chunk)
+            .where(Chunk.document_id == document_id, Chunk.user_id == user_id)
+            .order_by(Chunk.chunk_idx)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_chunks_by_idx_range(
+        self, document_id: str, user_id: str, start_idx: int, end_idx: int
+    ) -> list[Chunk]:
+        """Get chunks within a specific index range for a document."""
+        stmt = (
+            select(Chunk)
+            .where(
+                Chunk.document_id == document_id,
+                Chunk.user_id == user_id,
+                Chunk.chunk_idx >= start_idx,
+                Chunk.chunk_idx <= end_idx,
+            )
+            .order_by(Chunk.chunk_idx)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def delete_document(self, document_id: str, user_id: str) -> bool:
         stmt = delete(Document).where(Document.id == document_id, Document.user_id == user_id)
         result = await self.session.execute(stmt)

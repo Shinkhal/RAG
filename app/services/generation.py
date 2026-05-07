@@ -4,6 +4,10 @@ from app.llms.router import get_tier_llm_client
 from app.schemas.query import ExternalSearchResult, SourceReference
 
 
+async def _fallback_stream(message: str) -> AsyncIterator[str]:
+    yield message
+
+
 async def generate_answer(
     query: str,
     chunks: list[tuple[dict[str, Any], float]],
@@ -42,8 +46,16 @@ async def generate_answer(
         ]
 
     if force_general:
+        fallback_message = "I don't have enough information in the provided documents about this topic."
+        if stream:
+            return (
+                _fallback_stream(fallback_message),
+                [],
+                {"provider": llm_client.provider, "model": llm_client.model_name},
+                external_results or [],
+            )
         return (
-            "I don't have enough information in the provided documents about this topic.",
+            fallback_message,
             [],
             {"provider": llm_client.provider, "model": llm_client.model_name},
             external_results or [],

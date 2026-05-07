@@ -364,6 +364,41 @@ class EnvSettings:
     def rate_limit_window_seconds(self) -> int:
         return number("RATE_LIMIT_WINDOW_SECONDS", 60)
 
+    @property
+    def enable_bm25(self) -> bool:
+        """Enable BM25 keyword search alongside vector similarity."""
+        return optional("ENABLE_BM25", "true").lower() == "true"
+
+    @property
+    def enable_query_rewriting(self) -> bool:
+        """Enable LLM-based query rewriting for better retrieval."""
+        return optional("ENABLE_QUERY_REWRITING", "false").lower() == "true"
+
+    @property
+    def enable_reranking(self) -> bool:
+        """Enable cross-encoder reranking of retrieved chunks."""
+        return optional("ENABLE_RERANKING", "false").lower() == "true"
+
+    @property
+    def enable_parent_context(self) -> bool:
+        """Fetch parent document context around retrieved chunks."""
+        return optional("ENABLE_PARENT_CONTEXT", "false").lower() == "true"
+
+    @property
+    def parent_context_window(self) -> int:
+        """Number of chunks to fetch before/after each retrieved chunk."""
+        return number("PARENT_CONTEXT_WINDOW", 1)
+
+    @property
+    def topic_threshold(self) -> float:
+        """Minimum topic overlap for high-confidence retrieval."""
+        return number("TOPIC_THRESHOLD", 15) / 100.0
+
+    @property
+    def min_keyword_matches(self) -> int:
+        """Minimum keyword matches for strong lexical signal."""
+        return number("MIN_KEYWORD_MATCHES", 3)
+
 
 def get_settings() -> EnvSettings:
     """Return the shared env accessor used by the app."""

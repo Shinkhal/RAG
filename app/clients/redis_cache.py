@@ -227,6 +227,23 @@ class RedisCache:
     async def delete_cached_document(self, document_id: str) -> None:
         await self.delete(RedisKeys.document(document_id))
 
+    # ── Document Context Memory ─────────────────────────────
+
+    async def set_document_context(self, document_id: str, context: dict[str, Any]) -> None:
+        """Cache full document context for summarization (24h TTL)."""
+        key = f"doc_context:{document_id}"
+        await self.set(key, context, 86400)
+
+    async def get_document_context(self, document_id: str) -> dict[str, Any] | None:
+        """Retrieve cached document context."""
+        key = f"doc_context:{document_id}"
+        return await self.get(key)
+
+    async def delete_document_context(self, document_id: str) -> None:
+        """Remove cached context (e.g., on document delete)."""
+        key = f"doc_context:{document_id}"
+        await self.delete(key)
+
     # ── Job status caching ──────────────────────────────────────────────
     async def get_cached_job_status(self, job_id: str) -> dict[str, Any] | None:
         return await self.get(RedisKeys.ingest_job(job_id))
