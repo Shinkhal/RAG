@@ -20,6 +20,9 @@ class ExtractedPage(NamedTuple):
     text: str
 
 
+_PDF_DECORATIVE_GLYPHS = "\u25cf\u25cb\u2022\u25e6\u25a0\u25a1\uf0b7"
+
+
 def is_supported_file(content_type: str | None, filename: str | None = None) -> bool:
     if content_type and content_type in SUPPORTED_MIME_TYPES:
         return True
@@ -67,7 +70,9 @@ def extract_pages_from_pdf(file_data: bytes) -> list[ExtractedPage]:
     for page_num, page in enumerate(reader.pages, start=1):
         text = page.extract_text()
         if text:
-            pages.append(ExtractedPage(page_num=page_num, text=text))
+            cleaned = clean_pdf_text(text)
+            if cleaned:
+                pages.append(ExtractedPage(page_num=page_num, text=cleaned))
 
     if not pages:
         raise ValueError("The PDF file contains no extractable text (it may be image-only).")
@@ -89,22 +94,59 @@ def extract_text_from_plain(file_data: bytes) -> str:
     raise ValueError("Could not decode the text file. Please ensure it uses UTF-8 encoding.")
 
 
-def sliding_window_chunks(
-    text: str,
-    chunk_size: int | None = None,
-    overlap: int | None = None,
-) -> list[str]:
-    settings = get_settings()
-    chunk_size = chunk_size or settings.max_chunk_size
-    overlap = overlap or settings.chunk_overlap
+def normalize_document_text(text: str) -> str:
+    """Normalize extracted text while preserving paragraph and line boundaries."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    lines = [re.sub(r"[^\S\n]+", " ", line).strip() for line in text.split("\n")]
+    text = "\n".join(lines)
+    text = re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", text)
+    return text.strip()
 
-    splitter = RecursiveCharacterTextSplitter(
+
+def make_text_splitter(
+    chunk_size: int | None = None, overlap: int | None = None
+) -> RecursiveCharacterTextSplitter:
+    """Create a character-based splitter with validated configured limits."""
+    settings = get_settings()
+    chunk_size = settings.max_chunk_size if chunk_size is None else chunk_size
+    overlap = settings.chunk_overlap if overlap is None else overlap
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be greater than zero")
+    if overlap < 0 or overlap >= chunk_size:
+        raise ValueError("overlap must be non-negative and smaller than chunk_size")
+
+    return RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=overlap,
         separators=["\n\n", "\n", ". ", " ", ""],
     )
 
-    return splitter.split_text(text)
+
+def sliding_window_chunks(
+    text: str,
+    chunk_size: int | None = None,
+    overlap: int | None = None,
+) -> list[str]:
+    return make_text_splitter(chunk_size, overlap).split_text(text)
+
+
+def clean_pdf_text(text: str) -> str:
+    text = text.replace("\xa0", " ")
+    text = re.sub(rf"^[\s{re.escape(_PDF_DECORATIVE_GLYPHS)}]+(?=[A-Za-z0-9])", "", text)
+    text = re.sub(
+        rf"(?m)^[{re.escape(_PDF_DECORATIVE_GLYPHS)}\s]+$",
+        "",
+        text,
+    )
+    return normalize_document_text(text)
+
+
+def is_informative_text(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return bool(re.search(r"[A-Za-z0-9]", stripped))
 
 
 def batched(items: list[str], size: int | None = None) -> Iterator[list[str]]:

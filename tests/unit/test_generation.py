@@ -76,22 +76,27 @@ class TestBuildContext:
         assert "doc-123" in result
         assert "#7" in result
 
-    def test_categorizes_relevant_vs_weak(self) -> None:
+    def test_presents_all_chunks_as_retrieved_context(self) -> None:
         chunks = [
             {"content": "quantum physics is fascinating", "doc_name": "doc1", "page": 1, "chunk_id": 0},
             {"content": "biology and cells overview", "doc_name": "doc2", "page": 3, "chunk_id": 1},
         ]
         result = _build_context(chunks, "quantum physics")
-        assert "RELEVANT CONTEXT" in result
-        assert "WEAK CONTEXT" in result
+        # All chunks should be presented under unified RETRIEVED CONTEXT
+        assert "RETRIEVED CONTEXT" in result
+        assert "quantum physics is fascinating" in result
+        assert "biology and cells overview" in result
+        # Old weak/relevant split should not exist
+        assert "WEAK CONTEXT" not in result
+        assert "RELEVANT CONTEXT" not in result
 
-    def test_all_relevant(self) -> None:
+    def test_all_chunks_included(self) -> None:
         chunks = [
             {"content": "quantum physics particles", "doc_name": "doc1", "page": 1, "chunk_id": 0},
         ]
         result = _build_context(chunks, "quantum physics")
-        assert "RELEVANT CONTEXT" in result
-        assert "WEAK CONTEXT" not in result
+        assert "RETRIEVED CONTEXT" in result
+        assert "quantum physics particles" in result
 
     def test_includes_doc_metadata_in_context(self) -> None:
         chunks = [

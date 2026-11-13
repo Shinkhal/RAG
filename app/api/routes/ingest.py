@@ -37,6 +37,13 @@ async def ingest_document(
             detail=f"Unsupported file type '{file.content_type}'. Supported: {supported}",
         )
 
+    # user_id is supplied by the trusted application backend. Bind it to the
+    # session before accepting an upload so documents cannot be attached to a
+    # different user's session.
+    repo = SupabaseRepo(session)
+    if not await repo.get_session(session_id, user_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+
     settings = get_settings()
 
     # ── PDF-specific validations ──────────────────────────────────────
@@ -74,8 +81,6 @@ async def ingest_document(
     # ── Create DB records synchronously so the IDs exist ─────────────
     document_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
-    repo = SupabaseRepo(session)
-
     doc = Document(
         id=document_id,
         user_id=user_id,
@@ -123,10 +128,6 @@ async def get_ingest_status(
     user_id: str,
     session: AsyncSession = Depends(get_session),
 ) -> IngestStatusResponse:
-    cached = await redis_cache.get_cached_job_status(job_id)
-    if cached:
-        return IngestStatusResponse(**cached)
-
     from sqlalchemy import select
 
     stmt = select(IngestJob).where(IngestJob.job_id == job_id, IngestJob.user_id == user_id)
@@ -135,6 +136,12 @@ async def get_ingest_status(
 
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # Check ownership before returning a cache hit. The cache is keyed by job
+    # ID, not by user ID.
+    cached = await redis_cache.get_cached_job_status(job_id)
+    if cached:
+        return IngestStatusResponse(**cached)
 
     response = IngestStatusResponse(
         job_id=job.job_id,
@@ -155,15 +162,17 @@ async def get_document(
     user_id: str,
     session: AsyncSession = Depends(get_session),
 ) -> DocumentResponse:
-    cached = await redis_cache.get_cached_document(document_id)
-    if cached:
-        return DocumentResponse(**cached)
-
     repo = SupabaseRepo(session)
     doc = await repo.get_document(document_id, user_id)
 
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    # The document cache is keyed only by document ID, so check ownership in
+    # the database before serving cached metadata.
+    cached = await redis_cache.get_cached_document(document_id)
+    if cached:
+        return DocumentResponse(**cached)
 
     response = DocumentResponse(
         id=doc.id,

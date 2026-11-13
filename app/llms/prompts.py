@@ -36,14 +36,14 @@ def _build_context(context_chunks: list[dict[str, Any]], query: str) -> str:
     if not context_chunks:
         return "(No relevant documents found for this query.)\n"
 
-    query_words = {w.lower() for w in query.split() if len(w) > 2}
-    relevant: list[str] = []
-    weak: list[str] = []
+    # All chunks are presented as retrieved context — relevance ranking was
+    # already performed by the vector search + scoring pipeline.  Splitting
+    # into "relevant" vs "weak" based on naive word overlap was causing the
+    # LLM to ignore perfectly good chunks that happened to use different
+    # vocabulary than the query.
+    entries: list[str] = []
 
     for chunk in context_chunks:
-        chunk_text = chunk["content"].lower()
-        overlap = query_words & {w for w in chunk_text.split() if len(w) > 3}
-
         doc_name = (
             chunk.get("doc_name")
             or chunk.get("doc_title")
@@ -55,18 +55,9 @@ def _build_context(context_chunks: list[dict[str, Any]], query: str) -> str:
         )
         chunk_id = chunk.get("chunk_id", chunk.get("chunk_idx", "?"))
         entry = f"[{doc_name} | page {chunk.get('page', 'N/A')} | #{chunk_id}]\n{chunk['content']}"
-        if overlap:
-            relevant.append(entry)
-        else:
-            weak.append(entry)
+        entries.append(entry)
 
-    sections = []
-    if relevant:
-        sections.append("\n\n-- RELEVANT CONTEXT --\n\n" + "\n\n".join(relevant))
-    if weak:
-        sections.append("\n\n-- WEAK CONTEXT (may not be on-topic) --\n\n" + "\n\n".join(weak))
-
-    return "\n\n".join(sections)
+    return "\n\n-- RETRIEVED CONTEXT --\n\n" + "\n\n".join(entries)
 
 
 def _build_external_context(external_results: list[ExternalSearchResult]) -> str:

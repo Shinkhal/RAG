@@ -4,7 +4,9 @@ import pytest
 
 from app.services.chunking import (
     clean_text,
+    clean_pdf_text,
     extract_text_from_plain,
+    is_informative_text,
     is_supported_file,
     sliding_window_chunks,
 )
@@ -66,6 +68,24 @@ class TestCleanText:
 
     def test_tabs_and_mixed_whitespace(self) -> None:
         assert clean_text("hello\t\n  world") == "hello world"
+
+
+class TestCleanPdfText:
+    def test_removes_leading_decorative_glyphs(self) -> None:
+        text = "●●●Landour Trip - 3 nights & 4 days"
+        assert clean_pdf_text(text) == "Landour Trip - 3 nights & 4 days"
+
+    def test_removes_symbol_only_lines(self) -> None:
+        text = "Overview\n●●●\nDay 1 plan"
+        assert clean_pdf_text(text) == "Overview Day 1 plan"
+
+
+class TestIsInformativeText:
+    def test_rejects_symbol_only_text(self) -> None:
+        assert is_informative_text("●●●") is False
+
+    def test_accepts_text_with_letters(self) -> None:
+        assert is_informative_text("●●●Landour Trip") is True
 
 
 # ── extract_text_from_plain ───────────────────────────────────────

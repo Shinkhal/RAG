@@ -28,7 +28,7 @@ class TestKeywordBoost:
         assert boost == pytest.approx(0.0)
 
     def test_short_query_words_ignored(self) -> None:
-        # Words with len <= 2 are excluded from query words
+        # Words with len < 2 and stopwords are excluded from query words
         boost = _keyword_boost("a quantum is a thing", "a is quantum")
         assert boost == pytest.approx(0.05)  # only "quantum" counted
 
@@ -64,11 +64,11 @@ class TestTopicOverlap:
         assert overlap == 0.0
 
     def test_short_words_excluded_from_text(self) -> None:
-        # Words with len <= 3 are excluded from text words
-        query_words = {"the", "quantum"}
-        text = "the quantum"
+        # Words with len < 2 are excluded from text words by _signal_words
+        query_words = {"a", "quantum"}
+        text = "a quantum"
         overlap = _topic_overlap(text, query_words)
-        # "the" is <= 3 chars, excluded from text_words; only "quantum" matches
+        # "a" is 1 char, excluded from text_words; only "quantum" matches
         assert overlap == pytest.approx(0.5)
 
 
@@ -113,6 +113,18 @@ class TestParseQueryWords:
         words = _parse_query_words("What is Digestive Systems?")
         assert "digestive" in words
         assert "systems" in words
+
+    def test_keeps_short_domain_terms_and_numbers(self) -> None:
+        words = _parse_query_words("what to do on day 2?")
+        assert "day" in words
+        assert "2" in words
+
+
+class TestConfidenceGuard:
+    def test_day_number_query_can_overlap(self) -> None:
+        query_words = _parse_query_words("what to do on day 2?")
+        overlap = _topic_overlap("Day 2 — Fri, Dec 26: Jabarkhet Nature Reserve", query_words)
+        assert overlap > 0.0
 
 
 # ── _deduplicate_chunks ──────────────────────────────────────────

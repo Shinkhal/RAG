@@ -38,3 +38,6 @@ rag.zip
 .claude/
 .junie/
 .qwen
+
+
+.env

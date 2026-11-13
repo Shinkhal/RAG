@@ -8,9 +8,11 @@ from app.repositories.supabase_repo import ChunkRecord, SupabaseRepo
 from app.services.chunking import (
     ExtractedPage,
     batched,
-    clean_text,
     extract_pages_from_pdf,
     extract_text,
+    is_informative_text,
+    make_text_splitter,
+    normalize_document_text,
     sliding_window_chunks,
 )
 
@@ -24,25 +26,14 @@ class IngestProcessingResult:
 def _chunk_pages(
     pages: list[ExtractedPage], chunk_size: int | None, overlap: int | None
 ) -> list[tuple[int, str]]:
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-    from app.config.env_config import get_settings
-
-    settings = get_settings()
-    chunk_size = chunk_size or settings.max_chunk_size
-    overlap = overlap or settings.chunk_overlap
-
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=overlap,
-        separators=["\n\n", "\n", ". ", " ", ""],
-    )
+    splitter = make_text_splitter(chunk_size, overlap)
 
     all_chunks: list[tuple[int, str]] = []
     for page in pages:
         page_chunks = splitter.split_text(page.text)
         for chunk_text in page_chunks:
-            all_chunks.append((page.page_num, chunk_text))
+            if is_informative_text(chunk_text):
+                all_chunks.append((page.page_num, chunk_text))
 
     return all_chunks
 
@@ -74,12 +65,19 @@ async def process_ingest_job(
             pages = extract_pages_from_pdf(file_data)
             page_chunked = _chunk_pages(pages, chunk_size=None, overlap=None)
             total_chunks = len(page_chunked)
+            if not page_chunked:
+                raise ValueError("No indexable text was found in the PDF.")
 
             all_embeddings = []
             texts = [c[1] for c in page_chunked]
             for batch_texts in batched(texts):
                 embeddings = await gemini_client.embed_documents(batch_texts)
                 all_embeddings.extend(embeddings)
+
+            if len(all_embeddings) != len(page_chunked):
+                raise ValueError(
+                    f"Embedding count mismatch for PDF ingestion: expected {len(page_chunked)} got {len(all_embeddings)}"
+                )
 
             chunk_records = []
             for idx, ((page_num, chunk_text), embedding) in enumerate(
@@ -103,14 +101,25 @@ async def process_ingest_job(
                 chunk_records.append(record)
         else:
             raw_text = extract_text(file_data, content_type=content_type, filename=filename)
-            text = clean_text(raw_text)
-            chunks = sliding_window_chunks(text)
+            text = normalize_document_text(raw_text)
+            chunks = [
+                chunk
+                for chunk in sliding_window_chunks(text)
+                if is_informative_text(chunk)
+            ]
             total_chunks = len(chunks)
+            if not chunks:
+                raise ValueError("No indexable text was found in the document.")
 
             all_embeddings = []
             for batch in batched(chunks):
                 embeddings = await gemini_client.embed_documents(batch)
                 all_embeddings.extend(embeddings)
+
+            if len(all_embeddings) != len(chunks):
+                raise ValueError(
+                    f"Embedding count mismatch for text ingestion: expected {len(chunks)} got {len(all_embeddings)}"
+                )
 
             chunk_records = []
             for idx, (chunk_text, embedding) in enumerate(zip(chunks, all_embeddings)):
@@ -135,14 +144,13 @@ async def process_ingest_job(
 
         # Build and cache document context for summarization
         from app.clients.redis_cache import redis_cache
-        import json
 
         # Build full text from chunks
         full_text = "\n\n".join(c.content for c in chunk_records)
 
         # Build page mapping if available
         pages = []
-        if "page" in chunk_records[0].metadata:
+        if chunk_records and "page" in chunk_records[0].metadata:
             pages = [
                 {"page": c.metadata.get("page"), "chunk_idx": i}
                 for i, c in enumerate(chunk_records)

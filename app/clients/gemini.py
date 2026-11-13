@@ -6,6 +6,7 @@ from google import genai
 from google.genai import errors, types
 
 from app.config.env_config import get_settings
+from app.utils.logger import logger
 
 
 class GeminiClient:
@@ -49,41 +50,17 @@ class GeminiClient:
             return self._l2_normalize(values)
         return values
 
-    async def embed_documents(self, texts: list[str], batch_size: int = 32) -> list[list[float]]:
-        embeddings = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            result = None
-            for attempt in range(5):
-                try:
-                    result = await self.client.aio.models.embed_content(
-                        model=self._embedding_model,
-                        contents=batch,
-                        config=types.EmbedContentConfig(
-                            task_type="RETRIEVAL_DOCUMENT",
-                            output_dimensionality=self._embedding_output_dimensionality,
-                        ),
-                    )
-                    break
-                except errors.APIError as e:
-                    if e.code == 429 and attempt < 4:
-                        await asyncio.sleep(10.0)
-                    else:
-                        raise
-
-            if result:
-                embeddings.extend([self._normalize_if_needed(e.values) for e in result.embeddings])
-        return embeddings
-
-    async def embed_query(self, query: str) -> list[float]:
+    async def _embed_batch(
+        self, batch: list[str], task_type: str
+    ) -> list[list[float]]:
         result = None
         for attempt in range(5):
             try:
                 result = await self.client.aio.models.embed_content(
                     model=self._embedding_model,
-                    contents=query,
+                    contents=batch if len(batch) > 1 else batch[0],
                     config=types.EmbedContentConfig(
-                        task_type="RETRIEVAL_QUERY",
+                        task_type=task_type,
                         output_dimensionality=self._embedding_output_dimensionality,
                     ),
                 )
@@ -94,7 +71,39 @@ class GeminiClient:
                 else:
                     raise
 
-        return self._normalize_if_needed(result.embeddings[0].values)
+        if not result or not result.embeddings:
+            return []
+
+        return [self._normalize_if_needed(e.values) for e in result.embeddings]
+
+    async def embed_documents(self, texts: list[str], batch_size: int = 32) -> list[list[float]]:
+        embeddings = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            batch_embeddings = await self._embed_batch(batch, "RETRIEVAL_DOCUMENT")
+            if len(batch_embeddings) != len(batch):
+                logger.warning(
+                    "Gemini embedding count mismatch for batch: expected=%d got=%d; retrying one-by-one",
+                    len(batch),
+                    len(batch_embeddings),
+                )
+                batch_embeddings = []
+                for text in batch:
+                    single = await self._embed_batch([text], "RETRIEVAL_DOCUMENT")
+                    if len(single) != 1:
+                        raise ValueError(
+                            "Gemini returned an unexpected embedding count while retrying a document chunk."
+                        )
+                    batch_embeddings.extend(single)
+
+            embeddings.extend(batch_embeddings)
+        return embeddings
+
+    async def embed_query(self, query: str) -> list[float]:
+        embeddings = await self._embed_batch([query], "RETRIEVAL_QUERY")
+        if len(embeddings) != 1:
+            raise ValueError("Gemini returned an unexpected embedding count for the query.")
+        return embeddings[0]
 
     async def generate(
         self,

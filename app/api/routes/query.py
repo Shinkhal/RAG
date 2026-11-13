@@ -60,6 +60,12 @@ def is_summary_request(query: str) -> bool:
     return any(kw in query_lower for kw in SUMMARY_KEYWORDS)
 
 
+async def _require_owned_session(repo: SupabaseRepo, user_id: str, session_id: str) -> None:
+    """Require the trusted caller's user ID to own the requested chat session."""
+    if not await repo.get_session(session_id, user_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
 async def handle_summary_request(
     request: QueryRequest,
     repo: SupabaseRepo,
@@ -91,6 +97,8 @@ async def handle_summary_request(
     document = None
     if document_id:
         document = await repo.get_document(document_id, request.user_id)
+        if not document or document.session_id != request.session_id:
+            raise HTTPException(status_code=404, detail="Document not found")
 
     if not document_id:
         return QueryResponse(
@@ -135,18 +143,20 @@ async def handle_summary_request(
     truncated = full_text[:50000]
 
     # Build summary prompt
-    system_prompt, user_prompt = build_summary_prompt(
+    system_prompt, user_prompt_template = build_summary_prompt(
         query=request.query,
         summary_type="document",
         persona_config=persona_payload,
     )
 
-    # Generate summary
-    answer = await llm_client.grounded_answer(
-        query=user_prompt,
-        context_chunks=[_summary_context_chunk(document_name, truncated)],
-        persona_config=persona_payload,
-        stream=False,
+    # Fill in the context placeholder in the user prompt template
+    user_prompt = user_prompt_template.replace("{context}", truncated)
+
+    # Generate summary using _generate directly — grounded_answer() would
+    # overwrite our carefully-built summary prompt with the generic Q&A prompt
+    answer = await llm_client._generate(
+        prompt=user_prompt,
+        system_prompt=system_prompt,
     )
 
     processing_time_ms = int((time.time() - start_time) * 1000)
@@ -175,6 +185,7 @@ async def query_rag(
     start_time = time.time()
     settings = get_settings()
     repo = SupabaseRepo(session)
+    await _require_owned_session(repo, request.user_id, request.session_id)
 
     # Check if this is a summary request
     if is_summary_request(request.query):
@@ -190,6 +201,13 @@ async def query_rag(
         request.user_id,
         request.query,
         request.persona.persona_id if request.persona else None,
+        session_id=request.session_id,
+        options={
+            "filters": request.filters,
+            "config": request.config,
+            "subscription_tier": request.subscription_tier,
+            "external_knowledge": request.enable_external_knowledge,
+        },
     )
     if cached:
         cached["cached"] = True
@@ -231,7 +249,11 @@ async def query_rag(
         except Exception:
             pass
     top_score = chunks_with_scores[0][1] if chunks_with_scores else None
-    confidence = top_score
+    confidence = (
+        chunks_with_scores[0][0].get("vector_score", top_score)
+        if chunks_with_scores
+        else None
+    )
 
     external_results: list[ExternalSearchResult] = []
     if request.enable_external_knowledge:
@@ -286,6 +308,13 @@ async def query_rag(
         request.query,
         request.persona.persona_id if request.persona else None,
         response.model_dump(),
+        session_id=request.session_id,
+        options={
+            "filters": request.filters,
+            "config": request.config,
+            "subscription_tier": request.subscription_tier,
+            "external_knowledge": request.enable_external_knowledge,
+        },
     )
 
     await repo.log_query(
@@ -310,6 +339,7 @@ async def query_rag_stream(
 ):
     settings = get_settings()
     repo = SupabaseRepo(session)
+    await _require_owned_session(repo, request.user_id, request.session_id)
 
     persona_payload = None
     if request.persona:
@@ -346,7 +376,7 @@ async def query_rag_stream(
         raise HTTPException(status_code=404, detail="No relevant document chunks found")
     low_confidence = chunks_result.low_confidence
     top_score = chunks_with_scores[0][1] if chunks_with_scores else None
-    confidence = top_score
+    confidence = chunks_with_scores[0][0].get("vector_score", top_score)
 
     external_results: list[ExternalSearchResult] = []
     if request.enable_external_knowledge:

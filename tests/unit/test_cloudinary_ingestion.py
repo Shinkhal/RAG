@@ -1,3 +1,4 @@
+import importlib
 from types import SimpleNamespace
 from typing import cast
 
@@ -13,6 +14,10 @@ async def test_process_ingest_job_uploads_before_extracting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
+    redis_module = importlib.import_module("app.clients.redis_cache")
+
+    async def fake_set_document_context(document_id: str, context: dict) -> None:
+        return None
 
     class FakeStorageClient:
         async def upload_document(
@@ -68,6 +73,7 @@ async def test_process_ingest_job_uploads_before_extracting(
     monkeypatch.setattr(ingestion_module, "extract_text", fake_extract_text)
     monkeypatch.setattr(ingestion_module, "clean_text", fake_clean_text)
     monkeypatch.setattr(ingestion_module, "sliding_window_chunks", fake_sliding_window_chunks)
+    monkeypatch.setattr(redis_module.redis_cache, "set_document_context", fake_set_document_context)
 
     repo = cast(SupabaseRepo, FakeRepo())
     ingest_result = await ingestion_module.process_ingest_job(
@@ -88,6 +94,70 @@ async def test_process_ingest_job_uploads_before_extracting(
     assert calls.index("upload") < calls.index("extract")
     assert repo.saved_chunks is not None
     assert len(repo.saved_chunks) == 2
+
+
+@pytest.mark.asyncio
+async def test_process_ingest_job_raises_on_embedding_count_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis_module = importlib.import_module("app.clients.redis_cache")
+
+    async def fake_set_document_context(document_id: str, context: dict) -> None:
+        return None
+
+    class FakeStorageClient:
+        async def upload_document(
+            self,
+            user_id: str,
+            document_id: str,
+            file_data: bytes,
+            filename: str,
+            content_type: str | None = None,
+        ) -> dict[str, object]:
+            return {"provider": "cloudinary", "public_id": f"documents/{user_id}/{document_id}"}
+
+        async def delete_document_asset(self, metadata: dict[str, object] | None) -> bool:
+            return True
+
+    async def fake_embed_documents(texts: list[str]) -> list[list[float]]:
+        return [[1.0]]
+
+    def fake_extract_text(
+        file_data: bytes, content_type: str | None = None, filename: str | None = None
+    ) -> str:
+        return "hello world"
+
+    def fake_clean_text(text: str) -> str:
+        return text
+
+    def fake_sliding_window_chunks(text: str) -> list[str]:
+        return ["chunk-a", "chunk-b"]
+
+    class FakeRepo:
+        async def upsert_chunks(self, chunks: list[object]) -> int:
+            return len(chunks)
+
+    monkeypatch.setattr(ingestion_module, "cloudinary_storage_client", FakeStorageClient())
+    monkeypatch.setattr(
+        ingestion_module, "gemini_client", SimpleNamespace(embed_documents=fake_embed_documents)
+    )
+    monkeypatch.setattr(ingestion_module, "extract_text", fake_extract_text)
+    monkeypatch.setattr(ingestion_module, "clean_text", fake_clean_text)
+    monkeypatch.setattr(ingestion_module, "sliding_window_chunks", fake_sliding_window_chunks)
+    monkeypatch.setattr(redis_module.redis_cache, "set_document_context", fake_set_document_context)
+
+    repo = cast(SupabaseRepo, FakeRepo())
+    with pytest.raises(ValueError, match="Embedding count mismatch for text ingestion"):
+        await ingestion_module.process_ingest_job(
+            document_id="doc-123",
+            session_id="session-1",
+            user_id="user-1",
+            file_data=b"hello world plain text",
+            filename="report.txt",
+            repo=repo,
+            content_type="text/plain",
+            metadata={"source": "upload"},
+        )
 
 
 @pytest.mark.asyncio

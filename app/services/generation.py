@@ -25,7 +25,7 @@ async def generate_answer(
     else:
         context_chunks = [
             {
-                "content": chunk["content"],
+                "content": chunk.get("parent_context") or chunk["content"],
                 "doc_name": chunk["metadata"].get("filename", "Unknown"),
                 "page": chunk["metadata"].get("page"),
             }

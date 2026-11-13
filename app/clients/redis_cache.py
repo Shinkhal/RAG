@@ -98,8 +98,26 @@ class RedisCache:
         response = await self._http_client.get(f"{self._rest_url}/expire/{encoded_key}/{seconds}")
         response.raise_for_status()
 
-    def _make_key(self, user_id: str, query: str, persona_id: str | None = None) -> str:
-        key_scope = f"{user_id}:{query}:{persona_id or 'none'}"
+    def _make_key(
+        self,
+        user_id: str,
+        query: str,
+        persona_id: str | None = None,
+        session_id: str | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> str:
+        key_scope = json.dumps(
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "query": query,
+                "persona_id": persona_id,
+                "options": options or {},
+            },
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+        )
         query_hash = hashlib.sha256(key_scope.encode()).hexdigest()[:16]
         return RedisKeys.query_cache(user_id, query_hash)
 
@@ -167,9 +185,14 @@ class RedisCache:
         return current <= limit
 
     async def get_cached_query(
-        self, user_id: str, query: str, persona_id: str | None = None
+        self,
+        user_id: str,
+        query: str,
+        persona_id: str | None = None,
+        session_id: str | None = None,
+        options: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        key = self._make_key(user_id, query, persona_id)
+        key = self._make_key(user_id, query, persona_id, session_id, options)
         return await self.get(key)
 
     async def cache_query_result(
@@ -179,8 +202,10 @@ class RedisCache:
         persona_id: str | None,
         result: dict[str, Any],
         ttl_seconds: int | None = None,
+        session_id: str | None = None,
+        options: dict[str, Any] | None = None,
     ) -> None:
-        key = self._make_key(user_id, query, persona_id)
+        key = self._make_key(user_id, query, persona_id, session_id, options)
         await self.set(key, result, ttl_seconds)
 
     # ── Persona caching ──────────────────────────────────────────────

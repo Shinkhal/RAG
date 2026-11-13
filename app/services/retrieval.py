@@ -1,5 +1,7 @@
+import asyncio
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 from rank_bm25 import BM25Okapi
@@ -30,22 +32,113 @@ QUERY_STOPWORDS = {
     "explain",
     "define",
     "describe",
+    "about",
+    "into",
+    "from",
+    "with",
+    "this",
+    "that",
+    "these",
+    "those",
+    "have",
+    "will",
+    "would",
+    "could",
+    "should",
+    "your",
+    "their",
+    "there",
+    # Short function words (previously excluded by ≥4 char filter)
+    "is",
+    "of",
+    "to",
+    "in",
+    "on",
+    "at",
+    "by",
+    "an",
+    "or",
+    "no",
+    "if",
+    "do",
+    "so",
+    "be",
+    "as",
+    "it",
+    "am",
+    "us",
+    "we",
+    "he",
+    "me",
+    "my",
+    "up",
+    "are",
+    "was",
+    "the",
+    "and",
+    "but",
+    "not",
+    "for",
+    "has",
+    "had",
+    "can",
+    "did",
+    "may",
+    "its",
+    "our",
+    "his",
+    "her",
+    "all",
+    "any",
+    "get",
+    "got",
+    "does",
+    "been",
+    "also",
+    "than",
+    "then",
+    "them",
+    "each",
+    "over",
+    "some",
+    "very",
+    "just",
+    "more",
+    "most",
+    "such",
+    "much",
+    "only",
 }
+
+
+@lru_cache(maxsize=1)
+def _get_cross_encoder():
+    from sentence_transformers import CrossEncoder
+
+    return CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
 
 def _tokenize_words(text: str, minimum_length: int = 1) -> list[str]:
     return [token for token in re.findall(r"[a-z0-9]+", text.lower()) if len(token) >= minimum_length]
 
 
+def _signal_words(text: str) -> set[str]:
+    return {
+        word
+        for word in _tokenize_words(text, minimum_length=1)
+        if (len(word) >= 2) or word.isdigit()
+    }
+
+
 def _keyword_boost(text: str, query: str) -> float:
     query_words = _parse_query_words(query)
-    text_words = set(_tokenize_words(text, minimum_length=4))
+    text_words = _signal_words(text)
     matches = sum(1 for w in query_words if w in text_words)
     return matches * 0.05
 
 
 def _topic_overlap(text: str, query_words: set[str]) -> float:
-    text_words = set(_tokenize_words(text, minimum_length=4))
+    text_words = _signal_words(text)
     if not query_words:
         return 0.0
     overlap = text_words & query_words
@@ -53,21 +146,22 @@ def _topic_overlap(text: str, query_words: set[str]) -> float:
 
 
 def _has_strong_lexical_signal(text: str, query_words: set[str], minimum_matches: int = 3) -> bool:
-    text_words = set(_tokenize_words(text, minimum_length=4))
+    text_words = _signal_words(text)
     return len(text_words & query_words) >= minimum_matches
 
 
 def _deduplicate_chunks(
     chunks: list[tuple[dict[str, Any], float]],
 ) -> list[tuple[dict[str, Any], float]]:
-    seen: list[str] = []
+    seen: set[tuple[str, str]] = set()
     unique: list[tuple[dict[str, Any], float]] = []
 
     for item in chunks:
-        content = item[0]["content"]
-        key = content[:400]
+        chunk = item[0]
+        content = chunk["content"].strip()
+        key = (str(chunk.get("doc_id", "")), content)
         if key not in seen:
-            seen.append(key)
+            seen.add(key)
             unique.append(item)
 
     return unique
@@ -77,7 +171,8 @@ def _parse_query_words(query: str) -> set[str]:
     """Memoizable query word parsing."""
     return {
         word
-        for word in _tokenize_words(query, minimum_length=4)
+        for word in _tokenize_words(query, minimum_length=1)
+        if (len(word) >= 2) or word.isdigit()
         if word not in QUERY_STOPWORDS
     }
 
@@ -116,14 +211,13 @@ def _bm25_score(query: str, chunks: list[tuple[dict[str, Any], float]]) -> list[
     if not chunks:
         return []
 
-    # Tokenize chunk texts - c is already the dict from tuple unpacking
-    tokenized_chunks = [c["content"].lower().split() for c, _ in chunks]
+    tokenized_chunks = [_tokenize_words(c["content"]) for c, _ in chunks]
 
     # Create BM25 model
     bm25 = BM25Okapi(tokenized_chunks)
 
     # Tokenize query
-    query_tokens = query.lower().split()
+    query_tokens = [word for word in _tokenize_words(query) if word not in QUERY_STOPWORDS]
 
     # Get scores
     scores = bm25.get_scores(query_tokens)
@@ -137,20 +231,27 @@ def _reciprocal_rank_fusion(
     """
     Combine multiple rankings using Reciprocal Rank Fusion.
     Formula: RRF(d) = sum(1 / (k + rank_i(d)))
+    Uses (doc_id, chunk_idx) as stable identity key for dict items.
     """
-    scores = {}
-    items = {}
+    scores: dict[Any, float] = {}
+    items: dict[Any, Any] = {}
 
     for ranking in rankings:
         for rank, (item, _) in enumerate(ranking, 1):
-            item_id = id(item)
-            if item_id not in scores:
-                scores[item_id] = 0.0
-                items[item_id] = item
-            scores[item_id] += 1 / (k + rank)
+            # Use content-based key for chunk dicts, identity for others
+            if isinstance(item, dict) and "doc_id" in item and "chunk_idx" in item:
+                item_key: Any = (item["doc_id"], item["chunk_idx"])
+            elif isinstance(item, dict):
+                item_key = id(item)
+            else:
+                item_key = item
+            if item_key not in scores:
+                scores[item_key] = 0.0
+                items[item_key] = item
+            scores[item_key] += 1 / (k + rank)
 
     # Convert back to sorted list
-    results = [(items[item_id], score) for item_id, score in scores.items()]
+    results = [(items[item_key], score) for item_key, score in scores.items()]
     return sorted(results, key=lambda x: x[1], reverse=True)
 
 
@@ -203,17 +304,19 @@ async def retrieve_chunks(
     if min_keyword_matches is None:
         min_keyword_matches = settings.min_keyword_matches
 
-    # Query rewriting for better retrieval
+    # Keep the student's original wording for lexical search, reranking, and
+    # confidence. Rewriting is only used to make the embedding query broader.
+    embedding_query = query
     if settings.enable_query_rewriting:
         try:
-            query = await rewrite_query(query)
+            embedding_query = await rewrite_query(query)
         except Exception:
             pass  # Fallback to original query
 
-    query_embedding = await gemini_client.embed_query(query)
+    query_embedding = await gemini_client.embed_query(embedding_query)
     query_words = _parse_query_words(query)
 
-    results = await repo.similarity_search(
+    vector_results = await repo.similarity_search(
         embedding=query_embedding,
         user_id=user_id,
         session_id=session_id,
@@ -221,32 +324,47 @@ async def retrieve_chunks(
         min_score=min_score,
         document_ids=document_ids,
     )
+    lexical_results = (
+        await repo.lexical_search(
+            query=" ".join(sorted(query_words)),
+            user_id=user_id,
+            session_id=session_id,
+            top_k=top_k * 4,
+            document_ids=document_ids,
+        )
+        if use_bm25 and query_words
+        else []
+    )
 
-    if not results:
+    if not vector_results and not lexical_results:
         return RetrievalResult(chunks=[], low_confidence=True)
 
-    # Build initial scored list with vector + keyword + topic
-    scored: list[tuple[dict[str, Any], float]] = []
+    # Merge vector and full-session lexical candidates by stable chunk identity.
+    candidate_items: dict[tuple[str, int], dict[str, Any]] = {}
+    vector_ranking: list[tuple[dict[str, Any], float]] = []
+    lexical_ranking: list[tuple[dict[str, Any], float]] = []
     debug_records: list[dict[str, Any]] = []
-    for chunk, raw_score in results:
+
+    for chunk, raw_score in vector_results:
         clean_content = sanitize_context([{"content": chunk.content}])[0]["content"]
         boost = _keyword_boost(clean_content, query)
         final_score = min(raw_score + boost, 1.0)
-
         topic_score = _topic_overlap(clean_content, query_words)
         combined_score = final_score * (1 + topic_score)
-
-        scored.append(
-            (
-                {
-                    "content": clean_content,
-                    "doc_id": chunk.document_id,
-                    "chunk_idx": chunk.chunk_idx,
-                    "metadata": chunk.metadata_,
-                },
-                min(combined_score, 1.0),
-            )
+        key = (chunk.document_id, chunk.chunk_idx)
+        item = candidate_items.setdefault(
+            key,
+            {
+                "content": clean_content,
+                "doc_id": chunk.document_id,
+                "chunk_idx": chunk.chunk_idx,
+                "metadata": chunk.metadata_,
+                "vector_score": 0.0,
+                "lexical_score": 0.0,
+            },
         )
+        item["vector_score"] = float(raw_score)
+        vector_ranking.append((item, combined_score))
         debug_records.append({
             "doc_id": chunk.document_id,
             "chunk_idx": chunk.chunk_idx,
@@ -254,58 +372,65 @@ async def retrieve_chunks(
             "keyword_boost": boost,
             "final_score": final_score,
             "topic_score": topic_score,
-            "combined_score": min(combined_score, 1.0),
+            "combined_score": combined_score,
             "filename": chunk.metadata_.get("filename") if isinstance(chunk.metadata_, dict) else None,
         })
 
-    # Apply BM25 if enabled
-    if use_bm25 and len(scored) > 1:
-        bm25_scores = _bm25_score(query, scored)
+    for chunk, lexical_score in lexical_results:
+        key = (chunk.document_id, chunk.chunk_idx)
+        item = candidate_items.setdefault(
+            key,
+            {
+                "content": sanitize_context([{"content": chunk.content}])[0]["content"],
+                "doc_id": chunk.document_id,
+                "chunk_idx": chunk.chunk_idx,
+                "metadata": chunk.metadata_,
+                "vector_score": 0.0,
+                "lexical_score": 0.0,
+            },
+        )
+        item["lexical_score"] = float(lexical_score)
+        lexical_ranking.append((item, float(lexical_score)))
 
-        # Normalize BM25 scores to 0-1 range
-        if bm25_scores:
-            max_bm25 = max(bm25_scores)
-            min_bm25 = min(bm25_scores)
-            if max_bm25 > min_bm25:
-                normalized_bm25 = [
-                    (s - min_bm25) / (max_bm25 - min_bm25)
-                    for s in bm25_scores
-                ]
-            else:
-                normalized_bm25 = [0.5] * len(bm25_scores)
+    scored: list[tuple[dict[str, Any], float]]
+    if use_bm25:
+        candidates = list(candidate_items.values())
+        bm25_scores = _bm25_score(query, [(item, 0.0) for item in candidates])
+        bm25_ranking = sorted(
+            [(candidates[index], score) for index, score in enumerate(bm25_scores)],
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        if vector_ranking and bm25_ranking and max(bm25_scores) > min(bm25_scores):
+            scored = _reciprocal_rank_fusion(
+                sorted(vector_ranking, key=lambda item: item[1], reverse=True),
+                bm25_ranking,
+            )
+        elif vector_ranking and lexical_ranking:
+            scored = _reciprocal_rank_fusion(
+                sorted(vector_ranking, key=lambda item: item[1], reverse=True),
+                sorted(lexical_ranking, key=lambda item: item[1], reverse=True),
+            )
         else:
-            normalized_bm25 = []
-
-        # Combine vector + BM25 using RRF
-        vector_ranking = [(item, score) for item, score in scored]
-        bm25_ranking = [
-            (scored[i][0], normalized_bm25[i]) for i in range(len(scored))
-        ]
-
-        scored = _reciprocal_rank_fusion(vector_ranking, bm25_ranking)
+            scored = vector_ranking or bm25_ranking or lexical_ranking
+    else:
+        scored = vector_ranking
 
     # Apply cross-encoder reranking if enabled
     if use_reranking and len(scored) > 1:
         try:
-            from sentence_transformers import CrossEncoder
-
-            # Load model (caches after first load)
-            model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+            model = await asyncio.to_thread(_get_cross_encoder)
 
             # Prepare pairs for reranking
-            pairs = [(query, c[0]["content"]) for c, _ in scored[:top_k * 2]]
+            pairs = [(query, c["content"]) for c, _ in scored[:top_k * 2]]
 
             # Get reranking scores
-            rerank_scores = model.predict(pairs)
+            rerank_scores = await asyncio.to_thread(model.predict, pairs)
 
             # Combine with RRF scores
-            reranked = []
-            for i, (item, orig_score) in enumerate(scored[:top_k * 2]):
-                rerank_score = rerank_scores[i] if i < len(rerank_scores) else 0.0
-                combined = (orig_score * 0.3) + (float(rerank_score) * 0.7)
-                reranked.append((item, combined))
-
-            scored = reranked
+            reranked = list(zip(scored[:top_k * 2], rerank_scores))
+            reranked.sort(key=lambda pair: float(pair[1]), reverse=True)
+            scored = [item_score for item_score, _ in reranked] + scored[top_k * 2 :]
         except Exception:
             pass  # Fallback to RRF scores
 
@@ -319,21 +444,33 @@ async def retrieve_chunks(
         for chunk_data, score in top:
             try:
                 parent_text = await get_parent_context(
-                    chunk_data[0]["chunk_idx"],
-                    chunk_data[0]["doc_id"],
+                    chunk_data["chunk_idx"],
+                    chunk_data["doc_id"],
                     repo,
                     user_id,
                     context_window=settings.parent_context_window
                 )
-                enriched.append(({**chunk_data[0], "parent_context": parent_text}, score))
+                enriched.append(({**chunk_data, "parent_context": parent_text}, score))
             except Exception:
-                enriched.append((chunk_data[0], score))
+                enriched.append((chunk_data, score))
         top = enriched
 
     top_content = top[0][0]["content"] if top else ""
+    top_vector_score = top[0][0].get("vector_score", 0.0) if top else 0.0
     top_topic_overlap = _topic_overlap(top_content, query_words)
-    strong_lexical_signal = _has_strong_lexical_signal(top_content, query_words, min_keyword_matches)
-    low_confidence = bool(top) and top_topic_overlap < topic_threshold and not strong_lexical_signal
+    top_lexical_score = top[0][0].get("lexical_score", 0.0) if top else 0.0
+    strong_lexical_signal = (
+        top_lexical_score > 0
+        or _has_strong_lexical_signal(top_content, query_words, min_keyword_matches)
+    )
+    # Trust high vector scores even when topic overlap is low —
+    # prevents false "not enough info" when the embedding match is strong
+    low_confidence = (
+        bool(top)
+        and (not query_words or top_topic_overlap < topic_threshold)
+        and not strong_lexical_signal
+        and top_vector_score < 0.75
+    )
 
     debug_info = debug_records if low_confidence else None
 

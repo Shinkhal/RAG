@@ -1,9 +1,11 @@
 import hashlib
+import re
 from typing import Any
 
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.env_config import get_settings
 from app.db.models import ChatSession, Chunk, Document, IngestJob, Persona, QueryLog
 
 
@@ -95,6 +97,12 @@ class SupabaseRepo:
             LIMIT :limit
         """
 
+        # The IVFFlat index defaults to one probed list, which can miss nearby
+        # vectors. Increase recall for this transaction with a tunable probe count.
+        await self.session.execute(
+            text("SELECT set_config('ivfflat.probes', :probes, true)"),
+            {"probes": str(get_settings().ivfflat_probes)},
+        )
         result = await self.session.execute(text(query_str), params)
         rows = result.fetchall()
 
@@ -114,6 +122,71 @@ class SupabaseRepo:
             chunks_with_scores.append((chunk, row.score))
 
         return chunks_with_scores
+
+    async def lexical_search(
+        self,
+        query: str,
+        user_id: str,
+        session_id: str,
+        top_k: int = 20,
+        document_ids: list[str] | None = None,
+    ) -> list[tuple[Chunk, float]]:
+        """Search all session chunks with PostgreSQL full-text search."""
+        terms = re.findall(r"[\w]+", query.lower(), flags=re.UNICODE)
+        if not terms:
+            return []
+
+        # Terms are extracted as plain words before constructing the OR query,
+        # so user input cannot inject tsquery operators.
+        tsquery = " | ".join(terms)
+        doc_filter = ""
+        params: dict[str, Any] = {
+            "tsquery": tsquery,
+            "user_id": user_id,
+            "session_id": session_id,
+            "limit": top_k,
+        }
+        if document_ids:
+            for index, document_id in enumerate(document_ids):
+                params[f"doc_id_{index}"] = document_id
+            placeholders = ", ".join(
+                f":doc_id_{index}" for index in range(len(document_ids))
+            )
+            doc_filter = f"AND c.document_id IN ({placeholders})"
+
+        query_str = f"""
+            SELECT c.id, c.document_id, c.session_id, c.user_id, c.chunk_idx,
+                   c.content, c.embedding, c.metadata, c.created_at,
+                   ts_rank_cd(
+                       to_tsvector('simple', c.content),
+                       to_tsquery('simple', :tsquery)
+                   ) AS score
+            FROM chunks c
+            WHERE c.user_id = :user_id
+              AND c.session_id = :session_id
+              {doc_filter}
+              AND to_tsvector('simple', c.content) @@ to_tsquery('simple', :tsquery)
+            ORDER BY score DESC
+            LIMIT :limit
+        """
+        result = await self.session.execute(text(query_str), params)
+        return [
+            (
+                Chunk(
+                    id=row.id,
+                    document_id=row.document_id,
+                    session_id=row.session_id,
+                    user_id=row.user_id,
+                    chunk_idx=row.chunk_idx,
+                    content=row.content,
+                    embedding=row.embedding,
+                    metadata_=row.metadata,
+                    created_at=row.created_at,
+                ),
+                row.score,
+            )
+            for row in result.fetchall()
+        ]
 
     async def get_document(self, document_id: str, user_id: str) -> Document | None:
         stmt = select(Document).where(Document.id == document_id, Document.user_id == user_id)

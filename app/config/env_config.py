@@ -309,11 +309,11 @@ class EnvSettings:
 
     @property
     def max_chunk_size(self) -> int:
-        return number("MAX_CHUNK_SIZE", 500)
+        return number("MAX_CHUNK_SIZE", 2048)
 
     @property
     def chunk_overlap(self) -> int:
-        return number("CHUNK_OVERLAP", 20)
+        return number("CHUNK_OVERLAP", 256)
 
     @property
     def embedding_batch_size(self) -> int:
@@ -335,6 +335,13 @@ class EnvSettings:
     def min_retrieval_score(self) -> float:
         raw = optional("MIN_RETRIEVAL_SCORE", "0.5")
         return float(raw)
+
+    @property
+    def ivfflat_probes(self) -> int:
+        probes = number("IVFFLAT_PROBES", 10)
+        if probes < 1:
+            raise ValueError("IVFFLAT_PROBES must be at least 1")
+        return probes
 
     @property
     def log_level(self) -> str:
@@ -401,8 +408,10 @@ class EnvSettings:
 
 
 def get_settings() -> EnvSettings:
-    """Return the shared env accessor used by the app."""
-    return EnvSettings()
+    """Return the shared env accessor used by the app (cached singleton)."""
+    if not hasattr(get_settings, "_instance"):
+        get_settings._instance = EnvSettings()
+    return get_settings._instance
 
 
 def get_env() -> GetEnv:
