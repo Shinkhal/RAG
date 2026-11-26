@@ -150,7 +150,8 @@ async def handle_summary_request(
     )
 
     # Fill in the context placeholder in the user prompt template
-    user_prompt = user_prompt_template.replace("{context}", truncated)
+    named_context = f"Source document: {document_name}\n\n{truncated}"
+    user_prompt = user_prompt_template.replace("{context}", named_context)
 
     # Generate summary using _generate directly — grounded_answer() would
     # overwrite our carefully-built summary prompt with the generic Q&A prompt

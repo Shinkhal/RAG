@@ -356,6 +356,26 @@ class EnvSettings:
         return number("MAX_PDF_SIZE_MB", 10)
 
     @property
+    def max_upload_size_mb(self) -> int:
+        return number("MAX_UPLOAD_SIZE_MB", 10)
+
+    @property
+    def max_uploads_per_hour(self) -> int:
+        return number("MAX_UPLOADS_PER_HOUR", 20)
+
+    @property
+    def worker_poll_interval_seconds(self) -> float:
+        return float(optional("INGEST_WORKER_POLL_INTERVAL_SECONDS", "1"))
+
+    @property
+    def ingest_worker_lease_minutes(self) -> int:
+        return number("INGEST_WORKER_LEASE_MINUTES", 30)
+
+    @property
+    def cors_allowed_origins(self) -> list[str]:
+        return [origin.strip() for origin in optional("CORS_ALLOWED_ORIGINS").split(",") if origin.strip()]
+
+    @property
     def max_pdf_uploads_per_hour(self) -> int:
         return number("MAX_PDF_UPLOADS_PER_HOUR", 20)
 
@@ -375,6 +395,10 @@ class EnvSettings:
     def enable_bm25(self) -> bool:
         """Enable BM25 keyword search alongside vector similarity."""
         return optional("ENABLE_BM25", "true").lower() == "true"
+
+    @property
+    def enable_pdf_ocr(self) -> bool:
+        return optional("ENABLE_PDF_OCR", "false").lower() == "true"
 
     @property
     def enable_query_rewriting(self) -> bool:

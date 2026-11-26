@@ -49,7 +49,7 @@ async def test_process_ingest_job_uploads_before_extracting(
         calls.append("extract")
         return "hello world"
 
-    def fake_clean_text(text: str) -> str:
+    def fake_normalize_document_text(text: str) -> str:
         calls.append("clean")
         return text
 
@@ -71,7 +71,9 @@ async def test_process_ingest_job_uploads_before_extracting(
         ingestion_module, "gemini_client", SimpleNamespace(embed_documents=fake_embed_documents)
     )
     monkeypatch.setattr(ingestion_module, "extract_text", fake_extract_text)
-    monkeypatch.setattr(ingestion_module, "clean_text", fake_clean_text)
+    monkeypatch.setattr(
+        ingestion_module, "normalize_document_text", fake_normalize_document_text
+    )
     monkeypatch.setattr(ingestion_module, "sliding_window_chunks", fake_sliding_window_chunks)
     monkeypatch.setattr(redis_module.redis_cache, "set_document_context", fake_set_document_context)
 
@@ -127,7 +129,7 @@ async def test_process_ingest_job_raises_on_embedding_count_mismatch(
     ) -> str:
         return "hello world"
 
-    def fake_clean_text(text: str) -> str:
+    def fake_normalize_document_text(text: str) -> str:
         return text
 
     def fake_sliding_window_chunks(text: str) -> list[str]:
@@ -142,7 +144,7 @@ async def test_process_ingest_job_raises_on_embedding_count_mismatch(
         ingestion_module, "gemini_client", SimpleNamespace(embed_documents=fake_embed_documents)
     )
     monkeypatch.setattr(ingestion_module, "extract_text", fake_extract_text)
-    monkeypatch.setattr(ingestion_module, "clean_text", fake_clean_text)
+    monkeypatch.setattr(ingestion_module, "normalize_document_text", fake_normalize_document_text)
     monkeypatch.setattr(ingestion_module, "sliding_window_chunks", fake_sliding_window_chunks)
     monkeypatch.setattr(redis_module.redis_cache, "set_document_context", fake_set_document_context)
 

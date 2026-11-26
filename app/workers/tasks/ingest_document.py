@@ -1,10 +1,11 @@
 """Background task for async document ingestion."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+from app.clients.cloudinary_storage import cloudinary_storage_client
 from app.clients.redis_cache import redis_cache
+from app.config.env_config import get_settings
 from app.db.database import async_session
-from app.db.models import Document
 from app.repositories.supabase_repo import SupabaseRepo
 from app.services.ingestion import process_ingest_job
 from app.utils.logger import logger
@@ -15,10 +16,11 @@ async def run_ingest_task(
     session_id: str,
     user_id: str,
     job_id: str,
-    file_data: bytes,
     filename: str,
     content_type: str | None = None,
     metadata: dict | None = None,
+    storage_metadata: dict | None = None,
+    attempt: int = 1,
 ) -> None:
     """Process document ingestion in the background.
 
@@ -27,11 +29,18 @@ async def run_ingest_task(
     updates both the document and job records with the result.
     """
     metadata = metadata or {}
+    retry_delay = 0
 
     async with async_session() as session:
         repo = SupabaseRepo(session)
 
         try:
+            if not storage_metadata:
+                raise ValueError("Ingestion job has no persisted upload metadata")
+            file_data = await cloudinary_storage_client.download_document(
+                storage_metadata,
+                max_bytes=get_settings().max_upload_size_mb * 1024 * 1024,
+            )
             await repo.update_job_status(job_id, "processing")
 
             # Update document status to processing
@@ -48,6 +57,7 @@ async def run_ingest_task(
                 filename=filename,
                 content_type=content_type,
                 metadata=metadata,
+                storage_metadata=storage_metadata,
                 repo=repo,
             )
 
@@ -59,12 +69,14 @@ async def run_ingest_task(
             if doc:
                 doc.status = "processed"
                 doc.chunks_created = chunks_created
-                doc.processed_at = datetime.now(timezone.utc)
+                doc.embed_version = get_settings().embedding_model
+                doc.processed_at = datetime.now(UTC)
                 doc.metadata_ = {
                     **(doc.metadata_ or {}),
                     "storage": storage_metadata,
                     "uploaded_filename": filename,
                     "mime_type": content_type,
+                    "extraction_report": ingest_result.extraction_report,
                 }
                 await session.commit()
 
@@ -87,14 +99,19 @@ async def run_ingest_task(
             )
 
             # Re-fetch and mark as failed
+            retrying = attempt < 3
+            retry_delay = 2 ** attempt if retrying else 0
             try:
+                await session.rollback()
                 doc = await repo.get_document(document_id, user_id)
                 if doc:
-                    doc.status = "failed"
+                    doc.status = "queued" if retrying else "failed"
                     doc.error = str(e)
                     await session.commit()
 
-                await repo.update_job_status(job_id, "failed", error=str(e))
+                await repo.update_job_status(
+                    job_id, "queued" if retrying else "failed", error=str(e)
+                )
             except Exception as update_err:
                 logger.error(
                     "Failed to update error status: doc=%s error=%s",
@@ -106,3 +123,8 @@ async def run_ingest_task(
             # Always bust caches so clients see the latest state
             await redis_cache.delete_cached_job_status(job_id)
             await redis_cache.delete_cached_document(document_id)
+
+    if retry_delay:
+        import asyncio
+
+        await asyncio.sleep(retry_delay)

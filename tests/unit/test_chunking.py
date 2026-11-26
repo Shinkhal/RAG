@@ -3,13 +3,89 @@
 import pytest
 
 from app.services.chunking import (
-    clean_text,
     clean_pdf_text,
+    clean_text,
+    extract_pdf_with_report,
     extract_text_from_plain,
     is_informative_text,
     is_supported_file,
+    make_text_splitter,
+    normalize_document_text,
     sliding_window_chunks,
 )
+
+
+def test_pdf_extraction_report_tracks_pages_without_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    import PyPDF2
+
+    class Page:
+        def __init__(self, extracted: str | None) -> None:
+            self.extracted = extracted
+
+        def extract_text(self) -> str | None:
+            return self.extracted
+
+    class Reader:
+        def __init__(self, _file) -> None:
+            self.pages = [Page("Chapter one"), Page(None), Page("Chapter three")]
+
+    monkeypatch.setattr(PyPDF2, "PdfReader", Reader)
+    report = extract_pdf_with_report(b"pdf bytes")
+
+    assert report.page_count == 3
+    assert [page.page_num for page in report.pages] == [1, 3]
+    assert report.pages_without_text == [2]
+
+
+def test_pdf_extraction_can_ocr_pages_without_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    from types import ModuleType, SimpleNamespace
+
+    import PyPDF2
+
+    class Page:
+        def __init__(self, text: str | None) -> None:
+            self.text = text
+
+        def extract_text(self) -> str | None:
+            return self.text
+
+    class Reader:
+        def __init__(self, _file) -> None:
+            self.pages = [Page("Text page"), Page(None)]
+
+    class ImageContext:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    class PDF:
+        def load_page(self, _page_num):
+            return SimpleNamespace(get_pixmap=lambda dpi: SimpleNamespace(tobytes=lambda _format: b"png"))
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(PyPDF2, "PdfReader", Reader)
+    monkeypatch.setitem(sys.modules, "fitz", SimpleNamespace(open=lambda **_kwargs: PDF()))
+    monkeypatch.setitem(
+        sys.modules,
+        "pytesseract",
+        SimpleNamespace(image_to_string=lambda _image, timeout: "Scanned page text"),
+    )
+    pil_module = ModuleType("PIL")
+    pil_image_module = SimpleNamespace(open=lambda _source: ImageContext())
+    pil_module.Image = pil_image_module
+    monkeypatch.setitem(sys.modules, "PIL", pil_module)
+    monkeypatch.setitem(sys.modules, "PIL.Image", pil_image_module)
+
+    report = extract_pdf_with_report(b"pdf bytes", enable_ocr=True)
+
+    assert report.pages_without_text == []
+    assert report.ocr_pages == [2]
+    assert report.pages[1].text == "Scanned page text"
 
 
 # ── is_supported_file ─────────────────────────────────────────────
@@ -77,7 +153,20 @@ class TestCleanPdfText:
 
     def test_removes_symbol_only_lines(self) -> None:
         text = "Overview\n●●●\nDay 1 plan"
-        assert clean_pdf_text(text) == "Overview Day 1 plan"
+        assert clean_pdf_text(text) == "Overview\n\nDay 1 plan"
+
+
+class TestDocumentTextNormalization:
+    def test_preserves_paragraph_boundaries(self) -> None:
+        text = "Heading  \r\nBody line\r\n\r\nNext paragraph"
+        assert normalize_document_text(text) == "Heading\nBody line\n\nNext paragraph"
+
+    def test_rejects_invalid_chunk_settings(self) -> None:
+        with pytest.raises(ValueError, match="chunk_size"):
+            make_text_splitter(chunk_size=0, overlap=0)
+
+        with pytest.raises(ValueError, match="overlap"):
+            make_text_splitter(chunk_size=20, overlap=20)
 
 
 class TestIsInformativeText:

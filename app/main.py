@@ -1,5 +1,6 @@
+import asyncio
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI, Request
@@ -16,11 +17,14 @@ from app.db import init_db
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.services.personas import ensure_default_personas
 from app.utils.logger import logger
+from app.workers.queue import consume_ingest_jobs
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.start_time = time.time()
+    worker_task = None
+    redis_client = RedisConnection.get_instance()
 
     try:
         CloudinaryConfig.initialize()
@@ -29,11 +33,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 raise Exception("Cloudinary health check failed during startup")
             logger.warning("Cloudinary health check failed during startup")
 
-        redis_client = RedisConnection.get_instance()
         await redis_client.connect()
 
         await init_db()
         await ensure_default_personas()
+
+        worker_task = asyncio.create_task(consume_ingest_jobs())
 
         app.state.db_ready = True
 
@@ -49,6 +54,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
 
     yield
+    if worker_task:
+        worker_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await worker_task
     await redis_client.disconnect()
     # TODO: add Cloudinary shutdown if needed
 
@@ -61,8 +70,8 @@ app = FastAPI(
     middleware=[
         Middleware(
             CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=True,
+            allow_origins=get_settings().cors_allowed_origins,
+            allow_credentials=False,
             allow_methods=["*"],
             allow_headers=["*"],
         ),
@@ -119,7 +128,6 @@ def format_uptime(seconds: int):
 
 @app.get("/")
 async def root():
-    settings = get_settings()
     env = get_env()
 
     start_time = getattr(app.state, "start_time", None)

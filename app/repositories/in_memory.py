@@ -15,11 +15,12 @@ class InMemoryRepo:
         return doc
 
     async def upsert_chunks(self, chunks: list[dict[str, Any]]) -> int:
+        grouped: dict[str, dict[int, dict[str, Any]]] = {}
         for chunk in chunks:
             doc_id = chunk["document_id"]
-            if doc_id not in self._chunks:
-                self._chunks[doc_id] = []
-            self._chunks[doc_id].append(chunk)
+            grouped.setdefault(doc_id, {})[chunk["chunk_idx"]] = chunk
+        for doc_id, indexed_chunks in grouped.items():
+            self._chunks[doc_id] = [indexed_chunks[idx] for idx in sorted(indexed_chunks)]
         return len(chunks)
 
     async def similarity_search(

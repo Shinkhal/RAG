@@ -8,7 +8,7 @@ NotebookLM-style Retrieval Augmented Generation (RAG) backend built with FastAPI
 - **PostgreSQL (`pgvector`)** - Vector database via SQLAlchemy async
 - **Gemini** - Embeddings and answer generation
 - **Redis (Upstash-compatible)** - Query caching, document context memory
-- **Cloudflare R2** - Document object storage
+- **Cloudinary** - Durable source document storage
 - **BM25 + Cross-Encoder** - Hybrid search optimization
 - **Sentence-Transformers** - Reranking with ms-marco-MiniLM
 
@@ -68,6 +68,28 @@ PARENT_CONTEXT_WINDOW=2        # Chunks before/after each result
 uvicorn app.main:app --reload
 ```
 
+For production, run `python -m app.db.migrate` once as a deployment step before
+starting the API. Production startup checks database connectivity but does not
+run schema changes. Ingestion jobs are stored in PostgreSQL and source uploads
+are persisted to Cloudinary before the API returns `202`; all replicas can poll
+the same leased job queue.
+
+This service trusts `user_id` supplied by the main application backend. Keep it
+on a private network and restrict ingress to that backend. The main backend
+must authorize admin persona routes before proxying them. Browser CORS is off
+by default; set `CORS_ALLOWED_ORIGINS` to a comma-separated allowlist only if
+direct browser access is intentionally required.
+
+Uploads are bounded by `MAX_UPLOAD_SIZE_MB` (default 10 MB), with PDFs additionally
+bounded by `MAX_PDF_SIZE_MB`. PDF metadata reports pages with no extractable text;
+enable OCR to index scanned pages.
+Set `ENABLE_PDF_OCR=true` to OCR pages without text. This requires the Python
+packages in the dependency files and the Tesseract executable installed in the
+worker image; OCR’d and still-unreadable page numbers are included in document
+metadata.
+When changing `EMBEDDING_MODEL`, reindex existing documents; vector search filters
+out documents embedded with a different model until they are reindexed.
+
 Health check:
 
 ```text
@@ -83,8 +105,10 @@ Core variables are listed in `.env.example`, including:
 - `REDIS_URL` and `REDIS_TOKEN` (Redis protocol)
 - `REDIS_REST_URL` and `REDIS_REST_TOKEN` (Upstash REST fallback)
 - `UPSTASH_VECTOR_REST_URL`, `UPSTASH_VECTOR_REST_TOKEN` (optional; not active in retrieval yet)
-- `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`
-- `PERSONA_ADMIN_TOKEN` (required for admin persona CRUD endpoints)
+- `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
+- `MAX_UPLOAD_SIZE_MB`, `MAX_UPLOADS_PER_HOUR`, `INGEST_WORKER_LEASE_MINUTES`
+- `CORS_ALLOWED_ORIGINS` (optional, comma-separated browser origin allowlist)
+- `INGEST_WORKER_POLL_INTERVAL_SECONDS` (default `1`)
 
 ### Feature Flags
 

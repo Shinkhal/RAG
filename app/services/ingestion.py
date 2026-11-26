@@ -1,14 +1,16 @@
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from app.clients.cloudinary_storage import cloudinary_storage_client
 from app.clients.gemini import gemini_client
+from app.config.env_config import get_settings
 from app.repositories.supabase_repo import ChunkRecord, SupabaseRepo
 from app.services.chunking import (
     ExtractedPage,
     batched,
-    extract_pages_from_pdf,
+    extract_pdf_with_report,
     extract_text,
     is_informative_text,
     make_text_splitter,
@@ -21,6 +23,7 @@ from app.services.chunking import (
 class IngestProcessingResult:
     chunks_created: int
     storage_metadata: dict[str, Any]
+    extraction_report: dict[str, Any] | None = None
 
 
 def _chunk_pages(
@@ -47,22 +50,36 @@ async def process_ingest_job(
     repo: SupabaseRepo,
     content_type: str | None = None,
     metadata: dict[str, Any] | None = None,
+    storage_metadata: dict[str, Any] | None = None,
 ) -> IngestProcessingResult:
     metadata = metadata or {}
+    extraction_report = None
 
-    storage_metadata = await cloudinary_storage_client.upload_document(
-        user_id=user_id,
-        document_id=document_id,
-        file_data=file_data,
-        filename=filename,
-        content_type=content_type,
-    )
+    created_storage = storage_metadata is None
+    if created_storage:
+        storage_metadata = await cloudinary_storage_client.upload_document(
+            user_id=user_id,
+            document_id=document_id,
+            file_data=file_data,
+            filename=filename,
+            content_type=content_type,
+        )
 
     try:
         if content_type == "application/pdf" or (
             filename and filename.rsplit(".", 1)[-1].lower() == "pdf"
         ):
-            pages = extract_pages_from_pdf(file_data)
+            report = extract_pdf_with_report(
+                file_data, enable_ocr=get_settings().enable_pdf_ocr
+            )
+            pages = report.pages
+            extraction_report = {
+                "page_count": report.page_count,
+                "pages_with_text": len(report.pages) - len(report.pages_without_text),
+                "pages_without_text": report.pages_without_text,
+                "ocr_pages": report.ocr_pages,
+                "ocr_recommended": bool(report.pages_without_text),
+            }
             page_chunked = _chunk_pages(pages, chunk_size=None, overlap=None)
             total_chunks = len(page_chunked)
             if not page_chunked:
@@ -163,15 +180,18 @@ async def process_ingest_job(
             "full_text": full_text,
             "chunk_count": len(chunk_records),
             "pages": pages,
-            "created_at": __import__("datetime").datetime.utcnow().isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         await redis_cache.set_document_context(document_id, context)
     except Exception:
-        with suppress(Exception):
-            await cloudinary_storage_client.delete_document_asset(storage_metadata)
+        if created_storage:
+            with suppress(Exception):
+                await cloudinary_storage_client.delete_document_asset(storage_metadata)
         raise
 
     return IngestProcessingResult(
-        chunks_created=len(chunk_records), storage_metadata=storage_metadata
+        chunks_created=len(chunk_records),
+        storage_metadata=storage_metadata,
+        extraction_report=extraction_report,
     )

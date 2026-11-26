@@ -1,9 +1,13 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.cloudinary_storage import cloudinary_storage_client, extract_storage_metadata
 from app.clients.redis_cache import redis_cache
 from app.db import get_session
+from app.db.models import IngestJob
 from app.repositories.supabase_repo import SupabaseRepo
 from app.schemas.ingest import DeleteResponse
 
@@ -11,7 +15,7 @@ router = APIRouter()
 
 
 async def _delete_document_asset(doc) -> None:
-    storage_metadata = extract_storage_metadata(doc.metadata)
+    storage_metadata = extract_storage_metadata(doc.metadata_)
     if storage_metadata:
         await cloudinary_storage_client.delete_document_asset(storage_metadata)
 
@@ -35,6 +39,7 @@ async def delete_document(
         raise HTTPException(status_code=404, detail="Document not found")
 
     await redis_cache.delete_cached_document(document_id)
+    await redis_cache.delete_document_context(document_id)
 
     return DeleteResponse(document_id=document_id, deleted=True)
 
@@ -58,6 +63,7 @@ async def bulk_delete_documents(
         if await repo.delete_document(doc_id, user_id):
             deleted_count += 1
             await redis_cache.delete_cached_document(doc_id)
+            await redis_cache.delete_document_context(doc_id)
 
     return {"deleted": deleted_count, "total_requested": len(document_ids)}
 
@@ -74,4 +80,30 @@ async def reindex_document(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    return {"message": "Reindex not implemented yet", "document_id": document_id}
+    in_progress = await session.execute(
+        select(IngestJob.job_id).where(
+            IngestJob.document_id == document_id,
+            IngestJob.status.in_(["queued", "processing"]),
+        ).limit(1)
+    )
+    if in_progress.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Document ingestion is already in progress")
+
+    doc.status = "queued"
+    doc.error = None
+    doc.metadata_ = {
+        **(doc.metadata_ or {}),
+        "extraction_report": None,
+    }
+    job = IngestJob(
+        job_id=str(uuid.uuid4()),
+        document_id=doc.id,
+        session_id=doc.session_id,
+        user_id=user_id,
+        status="queued",
+    )
+    session.add(job)
+    await session.commit()
+    await redis_cache.delete_cached_document(document_id)
+    await redis_cache.delete_document_context(document_id)
+    return {"message": "Reindex queued", "document_id": document_id, "job_id": job.job_id}

@@ -1,15 +1,16 @@
 """Unit tests for the retrieval scoring helpers (no DB required)."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.services.retrieval import (
     _deduplicate_chunks,
-    _keyword_boost,
     _has_strong_lexical_signal,
+    _keyword_boost,
     _parse_query_words,
     _topic_overlap,
 )
-
 
 # ── _keyword_boost ────────────────────────────────────────────────
 
@@ -131,14 +132,22 @@ class TestConfidenceGuard:
 
 
 class TestDeduplicateChunks:
-    def test_removes_exact_duplicates(self) -> None:
+    def test_preserves_same_text_from_different_documents(self) -> None:
         chunks = [
             ({"content": "This is a chunk about physics.", "doc_id": "d1"}, 0.9),
             ({"content": "This is a chunk about physics.", "doc_id": "d2"}, 0.8),
         ]
         result = _deduplicate_chunks(chunks)
+        assert len(result) == 2
+
+    def test_removes_exact_duplicate_within_same_document(self) -> None:
+        chunks = [
+            ({"content": "This is a chunk about physics.", "doc_id": "d1"}, 0.9),
+            ({"content": "This is a chunk about physics.", "doc_id": "d1"}, 0.8),
+        ]
+        result = _deduplicate_chunks(chunks)
         assert len(result) == 1
-        assert result[0][1] == 0.9  # keeps the first (higher scored)
+        assert result[0][1] == 0.9
 
     def test_keeps_unique_chunks(self) -> None:
         chunks = [
@@ -148,15 +157,15 @@ class TestDeduplicateChunks:
         result = _deduplicate_chunks(chunks)
         assert len(result) == 2
 
-    def test_deduplicates_by_prefix(self) -> None:
-        # Two chunks with same first 400 chars but different endings
+    def test_preserves_chunks_with_same_prefix_but_different_content(self) -> None:
+        # Distinct chunks can share a long heading or boilerplate prefix.
         prefix = "A" * 400
         chunks = [
             ({"content": prefix + " ending one", "doc_id": "d1"}, 0.9),
             ({"content": prefix + " ending two", "doc_id": "d2"}, 0.8),
         ]
         result = _deduplicate_chunks(chunks)
-        assert len(result) == 1
+        assert len(result) == 2
 
     def test_empty_input(self) -> None:
         assert _deduplicate_chunks([]) == []
@@ -169,3 +178,54 @@ class TestDeduplicateChunks:
         ]
         result = _deduplicate_chunks(chunks)
         assert [c[1] for c in result] == [0.9, 0.7, 0.5]
+
+
+@pytest.mark.asyncio
+async def test_retrieval_merges_full_text_candidates_with_vector_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.services.retrieval as retrieval
+
+    vector_chunk = SimpleNamespace(
+        document_id="vector-doc",
+        chunk_idx=0,
+        content="Mitochondria produce energy through cellular respiration.",
+        metadata_={"filename": "biology.pdf"},
+    )
+    lexical_chunk = SimpleNamespace(
+        document_id="lexical-doc",
+        chunk_idx=1,
+        content="Acetaminophen dosing and contraindications are described here.",
+        metadata_={"filename": "medicine.pdf"},
+    )
+
+    class FakeRepo:
+        lexical_query = ""
+
+        async def similarity_search(self, **kwargs):
+            return [(vector_chunk, 0.72)]
+
+        async def lexical_search(self, **kwargs):
+            self.lexical_query = kwargs["query"]
+            return [(lexical_chunk, 0.8)]
+
+    async def fake_embed_query(query: str) -> list[float]:
+        return [0.1, 0.2]
+
+    monkeypatch.setattr(retrieval.gemini_client, "embed_query", fake_embed_query)
+    repo = FakeRepo()
+    result = await retrieval.retrieve_chunks(
+        query="acetaminophen dosing contraindications",
+        user_id="student-1",
+        session_id="session-1",
+        repo=repo,
+        top_k=2,
+        use_bm25=True,
+        use_reranking=False,
+    )
+
+    assert repo.lexical_query == "acetaminophen contraindications dosing"
+    assert {chunk["doc_id"] for chunk, _ in result.chunks} == {
+        "vector-doc",
+        "lexical-doc",
+    }

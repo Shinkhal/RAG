@@ -1,9 +1,10 @@
-import asyncio
 import uuid
+from contextlib import suppress
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clients.cloudinary_storage import cloudinary_storage_client
 from app.clients.redis_cache import redis_cache
 from app.config.env_config import get_settings
 from app.db import get_session
@@ -11,7 +12,6 @@ from app.db.models import Document, IngestJob
 from app.repositories.supabase_repo import SupabaseRepo
 from app.schemas.ingest import DocumentResponse, IngestResponse, IngestStatusResponse
 from app.services.chunking import SUPPORTED_MIME_TYPES, is_supported_file
-from app.workers.tasks.ingest_document import run_ingest_task
 
 router = APIRouter()
 
@@ -26,8 +26,8 @@ async def ingest_document(
 ) -> IngestResponse:
     """Accept a document for ingestion and return immediately.
 
-    The actual processing (upload, extract, embed, store) happens
-    in a background asyncio task.  Clients should poll
+    The upload is persisted before the durable database queue acknowledges it.
+    Clients should poll
     ``GET /ingest/status/{job_id}`` to track progress.
     """
     if not is_supported_file(file.content_type, file.filename):
@@ -46,9 +46,10 @@ async def ingest_document(
 
     settings = get_settings()
 
-    # ── PDF-specific validations ──────────────────────────────────────
+    # Apply a bounded size to every supported type before buffering or storing it.
+    max_size_mb = settings.max_upload_size_mb
     if file.content_type == "application/pdf":
-        max_size_mb = settings.max_pdf_size_mb
+        max_size_mb = min(max_size_mb, settings.max_pdf_size_mb)
         max_size_bytes = max_size_mb * 1024 * 1024
 
         if file.size and file.size > max_size_bytes:
@@ -57,61 +58,64 @@ async def ingest_document(
                 detail=f"PDF file size exceeds the limit of {max_size_mb} MB",
             )
 
-        rate_limit_key = f"rate_limit:pdf_upload:{user_id}"
-        max_uploads = settings.max_pdf_uploads_per_hour
-        is_allowed = await redis_cache.increment_rate_limit(rate_limit_key, max_uploads, 3600)
 
-        if not is_allowed:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Too many PDF uploads. Limit is {max_uploads} per hour.",
-            )
+    rate_limit_key = f"rate_limit:upload:{user_id}"
+    if not await redis_cache.increment_rate_limit(rate_limit_key, settings.max_uploads_per_hour, 3600):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many uploads. Limit is {settings.max_uploads_per_hour} per hour.",
+        )
 
     # ── Read file data and validate actual size ───────────────────────
-    file_data = await file.read()
-
-    if file.content_type == "application/pdf":
-        max_size_bytes = settings.max_pdf_size_mb * 1024 * 1024
-        if len(file_data) > max_size_bytes:
-            raise HTTPException(
-                status_code=400,
-                detail=f"PDF file size exceeds the limit of {settings.max_pdf_size_mb} MB",
-            )
+    max_size_bytes = max_size_mb * 1024 * 1024
+    file_data = await file.read(max_size_bytes + 1)
+    if len(file_data) > max_size_bytes:
+        raise HTTPException(status_code=413, detail=f"Upload exceeds the {max_size_mb} MB limit")
 
     # ── Create DB records synchronously so the IDs exist ─────────────
     document_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
-    doc = Document(
-        id=document_id,
-        user_id=user_id,
-        session_id=session_id,
-        status="queued",
-        metadata_=metadata or {},
-    )
-    await repo.upsert_document(doc)
+    filename = file.filename or "document"
+    storage_metadata = None
+    try:
+        storage_metadata = await cloudinary_storage_client.upload_document(
+            user_id=user_id,
+            document_id=document_id,
+            file_data=file_data,
+            filename=filename,
+            content_type=file.content_type,
+        )
+        doc = Document(
+            id=document_id,
+            user_id=user_id,
+            session_id=session_id,
+            status="queued",
+            embed_version=settings.embedding_model,
+            metadata_={
+                "storage": storage_metadata,
+                "uploaded_filename": filename,
+                "mime_type": file.content_type,
+                "ingest_metadata": metadata or {},
+            },
+        )
+        await repo.upsert_document(doc)
 
-    job = IngestJob(
-        job_id=job_id,
-        document_id=document_id,
-        session_id=session_id,
-        user_id=user_id,
-        status="queued",
-    )
-    await repo.create_ingest_job(job)
-
-    # ── Kick off background processing ────────────────────────────────
-    asyncio.create_task(
-        run_ingest_task(
+        job = IngestJob(
+            job_id=job_id,
             document_id=document_id,
             session_id=session_id,
             user_id=user_id,
-            job_id=job_id,
-            file_data=file_data,
-            filename=file.filename or "document.pdf",
-            content_type=file.content_type,
-            metadata=metadata or {},
+            status="queued",
         )
-    )
+        await repo.create_ingest_job(job)
+    except Exception:
+        await session.rollback()
+        if storage_metadata:
+            with suppress(Exception):
+                await cloudinary_storage_client.delete_document_asset(storage_metadata)
+        with suppress(Exception):
+            await repo.delete_document(document_id, user_id)
+        raise
 
     return IngestResponse(
         document_id=document_id,

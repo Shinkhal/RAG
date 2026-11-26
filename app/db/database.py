@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import os
 import asyncio
+import hashlib
+import os
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
@@ -38,7 +39,7 @@ else:
     max_overflow = int(optional("DATABASE_MAX_OVERFLOW", "10"))
     pool_timeout = int(optional("DATABASE_POOL_TIMEOUT", "30"))
     pool_recycle = int(optional("DATABASE_POOL_RECYCLE", "1800"))
-    
+
     engine = create_async_engine(
         ASYNC_DATABASE_URL,
         poolclass=AsyncAdaptedQueuePool,
@@ -78,44 +79,55 @@ def _split_sql_statements(sql: str) -> list[str]:
     return statements
 
 
+def _sync_schema_setup() -> None:
+    from . import models  # noqa: F401
+
+    with sync_engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS schema_migrations "
+            "(filename TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())"
+        ))
+        conn.execute(text("SELECT pg_advisory_xact_lock(741852963)"))
+        if MIGRATIONS_DIR.exists():
+            for sql_file in sorted(MIGRATIONS_DIR.glob("*.sql")):
+                sql_content = sql_file.read_text(encoding="utf-8")
+                checksum = hashlib.sha256(sql_content.encode("utf-8")).hexdigest()
+                applied = conn.execute(
+                    text("SELECT checksum FROM schema_migrations WHERE filename = :filename"),
+                    {"filename": sql_file.name},
+                ).scalar_one_or_none()
+                if applied:
+                    if applied != checksum:
+                        raise RuntimeError(f"Applied migration was modified: {sql_file.name}")
+                    continue
+                logger.info("Applying migration: %s", sql_file.name)
+                for statement in _split_sql_statements(sql_content):
+                    conn.exec_driver_sql(statement)
+                conn.execute(
+                    text("INSERT INTO schema_migrations (filename, checksum) VALUES (:filename, :checksum)"),
+                    {"filename": sql_file.name, "checksum": checksum},
+                )
+    Base.metadata.create_all(sync_engine)
+
+
+async def migrate_db() -> None:
+    """Apply pending versioned SQL migrations (run as a deployment step)."""
+    await asyncio.to_thread(check_connection)
+    await asyncio.to_thread(_sync_schema_setup)
+
+
 async def init_db() -> None:
-    """Initialize database connection, extensions, and tables."""
-    logger.info("Starting database initialization...")
+    """Check connectivity; migrations run automatically only outside production."""
     try:
         await asyncio.to_thread(check_connection)
-        logger.info("Database connection verified.")
-
-        # Import models here to ensure they are registered with Base.metadata
-        from . import models  # noqa: F401
-
-        logger.info("Models imported, starting sync connection...")
-
-        def _sync_setup() -> None:
-            with sync_engine.begin() as conn:
-                logger.info("Sync connection established, creating extensions...")
-                conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-                conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
-
-                # Run manual migrations if they exist
-                if MIGRATIONS_DIR.exists():
-                    logger.info(f"Running migrations from {MIGRATIONS_DIR}...")
-                    migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
-                    for sql_file in migration_files:
-                        logger.info(f"Executing migration: {sql_file.name}")
-                        sql_content = sql_file.read_text(encoding="utf-8")
-                        statements = _split_sql_statements(sql_content)
-                        for stmt in statements:
-                            conn.exec_driver_sql(stmt)
-
-            logger.info("Extensions and migrations verified, creating tables...")
-            # Create all tables defined in models (that might not be in migrations)
-            Base.metadata.create_all(sync_engine)
-
-        await asyncio.to_thread(_sync_setup)
-
-        logger.info("✅ Database initialized (extensions, migrations and tables verified)")
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize database: {e}")
+        if not settings.is_production:
+            await migrate_db()
+        else:
+            logger.info("Production database connected; schema is managed by deploy migrations.")
+    except Exception as exc:
+        logger.error("Database initialization failed: %s", exc)
         if settings.is_production:
             raise
 

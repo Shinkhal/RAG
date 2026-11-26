@@ -1,8 +1,10 @@
 import hashlib
 import re
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import delete, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.env_config import get_settings
@@ -44,17 +46,40 @@ class SupabaseRepo:
         return doc
 
     async def upsert_chunks(self, chunks: list[ChunkRecord]) -> int:
-        for chunk in chunks:
-            db_chunk = Chunk(
-                document_id=chunk.document_id,
-                session_id=chunk.session_id,
-                user_id=chunk.user_id,
-                chunk_idx=chunk.chunk_idx,
-                content=chunk.content,
-                embedding=chunk.embedding,
-                metadata_=chunk.metadata,
+        if not chunks:
+            return 0
+        values = [
+            {
+                "document_id": chunk.document_id,
+                "session_id": chunk.session_id,
+                "user_id": chunk.user_id,
+                "chunk_idx": chunk.chunk_idx,
+                "content": chunk.content,
+                "embedding": chunk.embedding,
+                "metadata_": chunk.metadata,
+            }
+            for chunk in chunks
+        ]
+        statement = pg_insert(Chunk).values(values)
+        statement = statement.on_conflict_do_update(
+            index_elements=[Chunk.document_id, Chunk.chunk_idx],
+            set_={
+                "session_id": statement.excluded.session_id,
+                "user_id": statement.excluded.user_id,
+                "content": statement.excluded.content,
+                "embedding": statement.excluded.embedding,
+                "metadata": statement.excluded["metadata"],
+            },
+        )
+        async with self.session.begin_nested():
+            await self.session.execute(statement)
+            document_id = chunks[0].document_id
+            await self.session.execute(
+                delete(Chunk).where(
+                    Chunk.document_id == document_id,
+                    Chunk.chunk_idx >= len(chunks),
+                )
             )
-            self.session.add(db_chunk)
         await self.session.commit()
         return len(chunks)
 
@@ -74,7 +99,7 @@ class SupabaseRepo:
             "embedding": embedding_str,
             "user_id": user_id,
             "session_id": session_id,
-            "min_score": min_score,
+            "embedding_model": get_settings().embedding_model,
             "limit": top_k,
         }
 
@@ -89,10 +114,11 @@ class SupabaseRepo:
             SELECT c.id, c.document_id, c.session_id, c.user_id, c.chunk_idx, c.content, c.embedding, c.metadata, c.created_at,
                    1 - (c.embedding <=> CAST(:embedding AS vector)) as score
             FROM chunks c
+            JOIN documents d ON d.id = c.document_id
             WHERE c.user_id = :user_id
             AND c.session_id = :session_id
+            AND d.embed_version = :embedding_model
             {doc_filter}
-            AND 1 - (c.embedding <=> CAST(:embedding AS vector)) >= :min_score
             ORDER BY c.embedding <=> CAST(:embedding AS vector)
             LIMIT :limit
         """
@@ -249,6 +275,10 @@ class SupabaseRepo:
             return None
 
         job.status = status
+        if status != "processing":
+            job.locked_at = None
+        if status in {"processed", "failed"}:
+            job.completed_at = datetime.now(UTC)
         if chunks_created is not None:
             job.chunks_created = chunks_created
         if error is not None:

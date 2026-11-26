@@ -4,6 +4,8 @@ import asyncio
 import io
 from typing import Any
 
+import httpx
+
 
 def _ensure_cloudinary_config() -> None:
     from app.config.cloudinary_config import CloudinaryConfig
@@ -120,6 +122,26 @@ class CloudinaryStorageClient:
 
         response = await asyncio.to_thread(_destroy)
         return response.get("result") in {"ok", "not found"}
+
+    async def download_document(self, metadata: dict[str, Any], max_bytes: int) -> bytes:
+        """Download an already-persisted upload for a retryable ingestion job."""
+        url = metadata.get("secure_url")
+        if not url:
+            raise ValueError("Stored upload is missing its download URL")
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
+            async with client.stream("GET", url, follow_redirects=True) as response:
+                response.raise_for_status()
+                length = response.headers.get("content-length")
+                if length and int(length) > max_bytes:
+                    raise ValueError("Stored upload exceeds the configured size limit")
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in response.aiter_bytes():
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError("Stored upload exceeds the configured size limit")
+                    chunks.append(chunk)
+        return b"".join(chunks)
 
 
 cloudinary_storage_client = CloudinaryStorageClient()

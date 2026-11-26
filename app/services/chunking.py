@@ -20,6 +20,13 @@ class ExtractedPage(NamedTuple):
     text: str
 
 
+class PDFExtractionReport(NamedTuple):
+    pages: list[ExtractedPage]
+    page_count: int
+    pages_without_text: list[int]
+    ocr_pages: list[int]
+
+
 _PDF_DECORATIVE_GLYPHS = "\u25cf\u25cb\u2022\u25e6\u25a0\u25a1\uf0b7"
 
 
@@ -56,6 +63,10 @@ def extract_text(
 
 
 def extract_pages_from_pdf(file_data: bytes) -> list[ExtractedPage]:
+    return extract_pdf_with_report(file_data).pages
+
+
+def extract_pdf_with_report(file_data: bytes, enable_ocr: bool = False) -> PDFExtractionReport:
     from PyPDF2 import PdfReader
     from PyPDF2.errors import PdfReadError
 
@@ -67,17 +78,54 @@ def extract_pages_from_pdf(file_data: bytes) -> list[ExtractedPage]:
         ) from exc
 
     pages: list[ExtractedPage] = []
+    pages_without_text: list[int] = []
+    ocr_pages: list[int] = []
+    missing_page_numbers: list[int] = []
     for page_num, page in enumerate(reader.pages, start=1):
         text = page.extract_text()
         if text:
             cleaned = clean_pdf_text(text)
             if cleaned:
                 pages.append(ExtractedPage(page_num=page_num, text=cleaned))
+            else:
+                missing_page_numbers.append(page_num)
+        else:
+            missing_page_numbers.append(page_num)
+
+    if enable_ocr and missing_page_numbers:
+        try:
+            import fitz
+            import pytesseract
+            from PIL import Image
+        except ImportError as exc:
+            raise RuntimeError(
+                "PDF OCR is enabled but PyMuPDF, Pillow, or pytesseract is not installed"
+            ) from exc
+
+        pdf = fitz.open(stream=file_data, filetype="pdf")
+        try:
+            for page_num in missing_page_numbers:
+                pixmap = pdf.load_page(page_num - 1).get_pixmap(dpi=200)
+                with Image.open(io.BytesIO(pixmap.tobytes("png"))) as image:
+                    ocr_text = pytesseract.image_to_string(image, timeout=45)
+                cleaned = clean_pdf_text(ocr_text)
+                if cleaned:
+                    pages.append(ExtractedPage(page_num=page_num, text=cleaned))
+                    ocr_pages.append(page_num)
+        finally:
+            pdf.close()
+
+    extracted_page_numbers = {page.page_num for page in pages}
+    pages_without_text = [
+        page_num for page_num in range(1, len(reader.pages) + 1)
+        if page_num not in extracted_page_numbers
+    ]
 
     if not pages:
         raise ValueError("The PDF file contains no extractable text (it may be image-only).")
 
-    return pages
+    pages.sort(key=lambda page: page.page_num)
+    return PDFExtractionReport(pages, len(reader.pages), pages_without_text, ocr_pages)
 
 
 def extract_text_from_pdf(file_data: bytes) -> str:

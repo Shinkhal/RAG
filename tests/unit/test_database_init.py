@@ -23,11 +23,11 @@ def test_split_sql_statements_ignores_comments_and_blank_lines() -> None:
 
 
 @pytest.mark.asyncio
-async def test_init_db_executes_migration_files(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_init_db_applies_and_records_migrations(monkeypatch: pytest.MonkeyPatch) -> None:
     statements: list[str] = []
 
     class FakeConnection:
-        def execute(self, statement):
+        def execute(self, statement, parameters=None):
             statements.append(str(statement))
             return FakeResult()
 
@@ -37,6 +37,9 @@ async def test_init_db_executes_migration_files(monkeypatch: pytest.MonkeyPatch)
     class FakeResult:
         def scalar(self) -> int:
             return 1
+
+        def scalar_one_or_none(self):
+            return None
 
     class FakeBegin:
         def __enter__(self) -> FakeConnection:
@@ -59,13 +62,12 @@ async def test_init_db_executes_migration_files(monkeypatch: pytest.MonkeyPatch)
 
     await database.init_db()
 
-    assert statements == [
-        "SELECT 1",
-        "CREATE EXTENSION IF NOT EXISTS vector",
-        "CREATE EXTENSION IF NOT EXISTS pgcrypto",
-        "CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY)",
-        "CREATE INDEX IF NOT EXISTS ix_documents_user_id ON documents (id)",
-    ]
+    assert statements[0] == "SELECT 1"
+    assert any("CREATE TABLE IF NOT EXISTS schema_migrations" in item for item in statements)
+    assert any("SELECT pg_advisory_xact_lock" in item for item in statements)
+    assert "CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY)" in statements
+    assert "CREATE INDEX IF NOT EXISTS ix_documents_user_id ON documents (id)" in statements
+    assert any("INSERT INTO schema_migrations" in item for item in statements)
 
 
 def test_database_url_prefers_database_url_over_direct_url(monkeypatch: pytest.MonkeyPatch) -> None:
