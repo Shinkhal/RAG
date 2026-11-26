@@ -1,3 +1,5 @@
+import asyncio
+
 from app.config.env_config import GetEnv
 from app.utils.logger import logger
 
@@ -32,8 +34,10 @@ class CloudinaryConfig:
             if not cls._initialized:
                 cls.initialize()
 
-            # Cloudinary Python SDK is sync → wrap if using async frameworks
-            cloudinary.api.ping()
+            # Bound the SDK request and keep blocking I/O off the event loop.
+            await asyncio.wait_for(
+                asyncio.to_thread(cloudinary.api.ping, timeout=5), timeout=6
+            )
             cls._health_status = True
             return True
         except Exception as e:

@@ -133,17 +133,15 @@ class CloudinaryStorageClient:
         """Download an already-persisted upload for a retryable ingestion job."""
         storage = extract_storage_metadata(metadata) or metadata
         url = storage.get("secure_url")
-        if storage.get("type") == "authenticated":
-            from cloudinary.utils import cloudinary_url
+        if storage.get("type") in {"authenticated", "private"}:
+            from cloudinary.utils import private_download_url
 
             _ensure_cloudinary_config()
-            url, _ = cloudinary_url(
+            url = private_download_url(
                 storage["public_id"],
-                version=storage.get("version"),
+                storage.get("format") or "",
                 resource_type=storage.get("resource_type", "raw"),
-                type="authenticated",
-                sign_url=True,
-                secure=True,
+                type=storage["type"],
             )
         if not url:
             raise ValueError("Stored upload is missing its download URL")

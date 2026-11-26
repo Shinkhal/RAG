@@ -1,6 +1,9 @@
 export interface Account {
   id: string;
+  first_name: string;
+  last_name: string;
   email: string;
+  created_at?: string;
 }
 
 export interface Notebook {
@@ -12,6 +15,7 @@ export interface SourceDocument {
   id: string;
   name: string;
   status: string;
+  chunks_created?: number;
 }
 
 export interface Answer {
@@ -49,22 +53,33 @@ async function request<T>(path: string, options: Options = {}): Promise<T> {
   const { data, method = "GET", signal } = options;
   const headers = new Headers({ "X-RAG-Request": "1" });
   if (data) headers.set("Content-Type", "application/json");
-  const response = await fetch(path, {
-    method,
-    headers,
-    signal,
-    body: data ? JSON.stringify(data) : options.body,
-    credentials: "same-origin",
-    cache: "no-store",
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method,
+      headers,
+      signal,
+      body: data ? JSON.stringify(data) : options.body,
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new ApiError(0, "Cannot reach the server. Check your connection and try again.");
+  }
   if (response.status === 204) return undefined as T;
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     if (response.status === 401 && path.startsWith(rag)) location.replace("/login");
     const fallback = response.status === 422
       ? "Check the fields and try again."
+      : response.status >= 500
+      ? "The backend is unavailable. Check that the API server is running and try again."
       : "The service could not complete the request. Try again.";
     throw new ApiError(response.status, typeof payload?.detail === "string" ? payload.detail : fallback);
+  }
+  if (payload === null || !response.headers.get("content-type")?.includes("application/json")) {
+    throw new ApiError(502, "The API returned an unexpected response. Check the frontend API proxy configuration.");
   }
   return payload as T;
 }
@@ -73,8 +88,17 @@ const sessionPath = (id: string) => `${rag}/sessions/${encodeURIComponent(id)}`;
 
 export const api = {
   account: (signal: AbortSignal) => request<Account>(`${auth}/me`, { signal }),
-  authenticate: (mode: "login" | "signup", data: { email: string; password: string }) =>
-    request<Account>(`${auth}/${mode}`, { method: "POST", data }),
+  authenticate: (
+    mode: "login" | "signup",
+    data: { email: string; password: string; first_name?: string; last_name?: string }
+  ) => request<Account>(`${auth}/${mode}`, { method: "POST", data }),
+  forgotPassword: (email: string) =>
+    request<{ message: string }>(`${auth}/forgot-password`, { method: "POST", data: { email } }),
+  resetPassword: (token: string, password: string) =>
+    request<{ message: string }>(`${auth}/reset-password`, {
+      method: "POST",
+      data: { token, password },
+    }),
   logout: () => request<void>(`${auth}/logout`, { method: "POST" }),
   notebooks: (signal: AbortSignal) => request<Notebook[]>(`${rag}/sessions`, { signal }),
   createNotebook: (title: string) =>
@@ -82,11 +106,15 @@ export const api = {
   history: (id: string, signal: AbortSignal) => request<Turn[]>(`${sessionPath(id)}/history`, { signal }),
   documents: (id: string, signal: AbortSignal) =>
     request<SourceDocument[]>(`${sessionPath(id)}/documents`, { signal }),
+  ingestStatus: (jobId: string, signal: AbortSignal) =>
+    request<{ status: string; error: string | null; chunks_created: number }>(`${rag}/ingest/status/${encodeURIComponent(jobId)}`, { signal }),
+  document: (documentId: string, signal: AbortSignal) =>
+    request<{ status: string; error: string | null; chunks_created: number }>(`${rag}/documents/${encodeURIComponent(documentId)}`, { signal }),
   upload: (sessionId: string, file: File) => {
     const body = new FormData();
     body.set("session_id", sessionId);
     body.set("file", file);
-    return request<unknown>(`${rag}/ingest`, { method: "POST", body });
+    return request<{ document_id: string; job_id: string | null; status: string }>(`${rag}/ingest`, { method: "POST", body });
   },
   ask: (sessionId: string, question: string) =>
     request<Answer>(`${rag}/query`, { method: "POST", data: { session_id: sessionId, query: question } }),

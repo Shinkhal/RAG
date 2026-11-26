@@ -116,3 +116,21 @@ def test_check_connection_executes_select_one(monkeypatch: pytest.MonkeyPatch) -
     database.check_connection()
 
     assert statements == ["SELECT 1"]
+
+
+@pytest.mark.asyncio
+async def test_database_connection_failure_returns_service_unavailable(monkeypatch):
+    from fastapi import HTTPException
+
+    class UnavailableSession:
+        async def __aenter__(self):
+            raise TimeoutError('database unreachable')
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(database, 'async_session', UnavailableSession)
+    with pytest.raises(HTTPException) as error:
+        await anext(database.get_session())
+    assert error.value.status_code == 503
+    assert 'Database unavailable' in error.value.detail

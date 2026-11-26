@@ -1,0 +1,12 @@
+Hi {{ first_name or "there" }},
+
+Welcome to RAG Workspace! Your account is ready.
+
+Quick start:
+1. Create a notebook in your workspace
+2. Upload your PDFs, TXT, Markdown, or CSV documents
+3. Ask questions and review the cited excerpts
+
+Open your workspace: {{ workspace_url }}
+
+— RAG Workspace

@@ -211,3 +211,69 @@ async def test_cloudinary_storage_client_normalizes_and_deletes(
     deleted = await client.delete_document_asset({"storage": upload_result})
     assert deleted is True
     assert calls[-1][0] == "destroy"
+
+
+@pytest.mark.asyncio
+async def test_cloudinary_download_document_uses_private_download_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import cloudinary.utils as cloudinary_utils
+
+    requested_urls: list[str] = []
+
+    monkeypatch.setattr(storage_module, "_ensure_cloudinary_config", lambda: None)
+    monkeypatch.setattr(
+        cloudinary_utils,
+        "private_download_url",
+        lambda public_id, fmt, resource_type="raw", type="authenticated": (
+            f"https://api.cloudinary.com/v1_1/demo/{resource_type}/download?public_id={public_id}&type={type}"
+        ),
+    )
+
+    class FakeResponse:
+        headers = {"content-length": "9"}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        async def aiter_bytes(self):
+            yield b"pdf-bytes"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def stream(self, method: str, url: str, follow_redirects: bool = True):
+            requested_urls.append(url)
+            return FakeResponse()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(storage_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    client = storage_module.CloudinaryStorageClient()
+    data = await client.download_document(
+        {
+            "storage": {
+                "provider": "cloudinary",
+                "public_id": "documents/u1/doc-1.pdf",
+                "resource_type": "raw",
+                "type": "authenticated",
+            }
+        },
+        max_bytes=1024,
+    )
+
+    assert data == b"pdf-bytes"
+    assert len(requested_urls) == 1
+    assert requested_urls[0].startswith("https://api.cloudinary.com/v1_1/demo/raw/download")

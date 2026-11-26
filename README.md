@@ -90,6 +90,13 @@ npm run dev
 
 Open [the development workspace](http://localhost:5173/workspace). Vite proxies `/api` to FastAPI at `http://127.0.0.1:8000`. For a different backend address, set `RAG_API_TARGET` in `frontend/.env.local` and restart Vite.
 
+If Vite reports `ECONNREFUSED 127.0.0.1:8000`, the API has not started listening.
+Keep the backend terminal open and wait for `Application startup complete`.
+Database connections time out after `DATABASE_CONNECT_TIMEOUT_SECONDS` (default 10)
+instead of waiting indefinitely. If startup reports a database connection failure,
+check `DATABASE_URL` and database/network availability; authenticated operations
+require a working database even when the development server can serve pages.
+
 For a single-port setup, run `npm ci` and `npm run build` from `frontend/`, then start FastAPI from `backend/`. FastAPI serves `frontend/dist/` at [http://127.0.0.1:8000/workspace](http://127.0.0.1:8000/workspace). Include the built frontend alongside the backend in your deployment.
 
 Health check:

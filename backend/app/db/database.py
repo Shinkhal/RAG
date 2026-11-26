@@ -5,7 +5,9 @@ import hashlib
 import os
 from pathlib import Path
 
+from fastapi import HTTPException
 from sqlalchemy import create_engine, make_url, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
@@ -15,12 +17,15 @@ from app.utils.logger import logger
 
 settings = get_settings()
 DATABASE_URL = settings.database_url
+CONNECT_TIMEOUT = max(1, int(optional("DATABASE_CONNECT_TIMEOUT_SECONDS", "10")))
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "db" / "migrations"
 
 # Sync engine for initial setup and health checks (always NullPool)
 sync_engine = create_engine(
-    make_url(DATABASE_URL).set(drivername="postgresql+psycopg"), poolclass=NullPool
+    make_url(DATABASE_URL).set(drivername="postgresql+psycopg"),
+    poolclass=NullPool,
+    connect_args={"connect_timeout": CONNECT_TIMEOUT},
 )
 
 # Async engine for the main application logic
@@ -31,8 +36,16 @@ ASYNC_DATABASE_URL = make_url(DATABASE_URL).set(drivername="postgresql+asyncpg")
 if "prepared_statement_cache_size" not in ASYNC_DATABASE_URL.query:
     ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.update_query_dict({"prepared_statement_cache_size": "0"})
 
+async_connect_args = {
+    "timeout": CONNECT_TIMEOUT,
+    "statement_cache_size": 0,
+    "prepared_statement_cache_size": 0,
+}
+
 if USE_NULL_POOL:
-    engine = create_async_engine(ASYNC_DATABASE_URL, poolclass=NullPool)
+    engine = create_async_engine(
+        ASYNC_DATABASE_URL, poolclass=NullPool, connect_args=async_connect_args
+    )
 else:
     pool_size = int(optional("DATABASE_POOL_SIZE", "5"))
     max_overflow = int(optional("DATABASE_MAX_OVERFLOW", "10"))
@@ -41,6 +54,7 @@ else:
 
     engine = create_async_engine(
         ASYNC_DATABASE_URL,
+        connect_args=async_connect_args,
         poolclass=AsyncAdaptedQueuePool,
         pool_size=pool_size,
         max_overflow=max_overflow,
@@ -132,5 +146,11 @@ async def init_db() -> None:
 
 async def get_session() -> AsyncSession:
     """Dependency for async database sessions."""
-    async with async_session() as session:
-        yield session
+    try:
+        async with async_session() as session:
+            yield session
+    except (OperationalError, OSError, asyncio.TimeoutError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Database unavailable. Check the backend database connection and try again.",
+        ) from exc

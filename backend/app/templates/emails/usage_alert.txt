@@ -1,0 +1,12 @@
+Hi {{ first_name or "there" }},
+
+{{ heading or "Your workspace usage summary" }}
+
+{{ summary }}
+{% if uploads_used is defined %}Uploads: {{ uploads_used }}{% if uploads_limit is defined %} / {{ uploads_limit }}{% endif %}
+{% endif %}{% if queries_used is defined %}Queries: {{ queries_used }}{% if queries_limit is defined %} / {{ queries_limit }}{% endif %}
+{% endif %}{% if period_label %}Period: {{ period_label }}
+{% endif %}
+Open your workspace: {{ workspace_url }}
+
+— RAG Workspace

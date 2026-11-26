@@ -1,0 +1,8 @@
+Hi {{ first_name or "there" }},
+
+Your document "{{ document_name }}" in {{ notebook_title or "your notebook" }} is {{ status_label }}.
+{% if error_message %}Reason: {{ error_message }}
+{% endif %}
+Open your workspace: {{ workspace_url }}
+
+— RAG Workspace

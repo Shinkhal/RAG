@@ -430,6 +430,34 @@ class EnvSettings:
         """Minimum keyword matches for strong lexical signal."""
         return number("MIN_KEYWORD_MATCHES", 3)
 
+    @property
+    def frontend_url(self) -> str:
+        return optional("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+
+    @property
+    def smtp_host(self) -> str:
+        return optional("SMTP_HOST")
+
+    @property
+    def smtp_port(self) -> int:
+        return number("SMTP_PORT", 587)
+
+    @property
+    def smtp_user(self) -> str:
+        return optional("SMTP_USER")
+
+    @property
+    def smtp_password(self) -> str:
+        return optional("SMTP_PASSWORD")
+
+    @property
+    def smtp_from_email(self) -> str:
+        return optional("SMTP_FROM_EMAIL") or self.smtp_user
+
+    @property
+    def smtp_use_tls(self) -> bool:
+        return optional("SMTP_USE_TLS", "true").lower() == "true"
+
 
 def get_settings() -> EnvSettings:
     """Return the shared env accessor used by the app (cached singleton)."""

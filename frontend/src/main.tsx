@@ -1,31 +1,91 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { AuthPage } from "./AuthPage";
-import { Workspace } from "./Workspace";
+import { Topbar } from "./components/Topbar";
+import { Alert } from "./components/Alert";
+import { LandingPage } from "./pages/LandingPage";
+import { AuthPage } from "./pages/AuthPage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
+import { WorkspacePage } from "./pages/WorkspacePage";
 import { api, ApiError, errorMessage, type Account } from "./api";
-import "./workspace.css";
+import "./styles/global.css";
+import "./styles/workspace.css";
+
+type View = "loading" | "landing" | "auth" | "forgot" | "reset" | "workspace";
 
 function App() {
   const [account, setAccount] = useState<Account | null | undefined>();
   const [error, setError] = useState("");
   const [signingOut, setSigningOut] = useState(false);
+  const [view, setView] = useState<View>("loading");
   const path = location.pathname;
 
   useEffect(() => {
     const controller = new AbortController();
-    api.account(controller.signal).then((account) => {
-      if (path === "/workspace") setAccount(account);
-      else location.replace("/workspace");
-    }).catch((error) => {
-      if (controller.signal.aborted) return;
-      if (error instanceof ApiError && error.status === 401) {
-        if (path === "/login" || path === "/signup") setAccount(null);
-        else location.replace("/login");
-      } else {
-        setError(errorMessage(error));
-      }
-    });
-    return () => controller.abort();
+
+    if (path === "/" || path === "") {
+      api
+        .account(controller.signal)
+        .then(() => {
+          location.replace("/workspace");
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setAccount(null);
+            setView("landing");
+          }
+        });
+      return () => controller.abort();
+    }
+
+    if (
+      path === "/login" ||
+      path === "/signup" ||
+      path === "/forgot-password" ||
+      path === "/reset-password"
+    ) {
+      const targetView: View =
+        path === "/forgot-password"
+          ? "forgot"
+          : path === "/reset-password"
+          ? "reset"
+          : "auth";
+      api
+        .account(controller.signal)
+        .then(() => {
+          location.replace("/workspace");
+        })
+        .catch((err) => {
+          if (controller.signal.aborted) return;
+          if (!(err instanceof ApiError && err.status === 401)) {
+            setError(errorMessage(err));
+          }
+          setAccount(null);
+          setView(targetView);
+        });
+      return () => controller.abort();
+    }
+
+    if (path === "/workspace") {
+      api
+        .account(controller.signal)
+        .then((acc) => {
+          setAccount(acc);
+          setView("workspace");
+        })
+        .catch((err) => {
+          if (controller.signal.aborted) return;
+          if (err instanceof ApiError && err.status === 401) {
+            location.replace("/login");
+          } else {
+            setError(errorMessage(err));
+            setView("workspace");
+          }
+        });
+      return () => controller.abort();
+    }
+
+    location.replace("/");
   }, [path]);
 
   async function signOut() {
@@ -33,29 +93,47 @@ function App() {
     setError("");
     try {
       await api.logout();
-      location.replace("/login");
-    } catch (error) {
-      setError(errorMessage(error));
+      location.replace("/");
+    } catch (err) {
+      setError(errorMessage(err));
       setSigningOut(false);
     }
   }
 
+  if (view === "landing") {
+    return <LandingPage />;
+  }
+
+  if (view === "auth") {
+    return <AuthPage signup={path === "/signup"} />;
+  }
+
+  if (view === "forgot") {
+    return <ForgotPasswordPage />;
+  }
+
+  if (view === "reset") {
+    return <ResetPasswordPage />;
+  }
+
   return (
     <>
-      <header className="topbar">
-        <a className="brand" href="/workspace"><span className="mark" aria-hidden="true">▤</span> RAG Workspace</a>
-        {account && (
-          <div className="account"><span id="email">{account.email}</span>
-            <button className="secondary" disabled={signingOut} onClick={signOut}>Sign out</button>
-          </div>
-        )}
-      </header>
-      {error && <p className="error banner" role="alert">{error}</p>}
-      {account === undefined && !error && <p className="boot" role="status">Loading workspace…</p>}
-      {account === null && <AuthPage signup={path === "/signup"} />}
-      {account && <Workspace />}
+      <Topbar account={account} signingOut={signingOut} onSignOut={signOut} />
+      {error && <Alert className="app-banner">{error}</Alert>}
+      {view === "loading" && (
+        <div className="app-loading">
+          <p className="text-muted" role="status">
+            Loading workspace…
+          </p>
+        </div>
+      )}
+      {view === "workspace" && account && <WorkspacePage />}
     </>
   );
 }
 
-createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+);
