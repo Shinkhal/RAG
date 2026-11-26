@@ -122,16 +122,24 @@ def format_uptime(seconds: int):
     return f"{hrs}h {mins}m {sec}s"
 
 
-web_dir = Path(__file__).resolve().parents[2] / "frontend"
-app.mount("/assets", StaticFiles(directory=web_dir), name="workspace-assets")
+web_dir = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+app.mount(
+    "/assets", StaticFiles(directory=web_dir / "assets", check_dir=False), name="workspace-assets"
+)
 
 
 @app.get("/login", include_in_schema=False)
 @app.get("/signup", include_in_schema=False)
 @app.get("/workspace", include_in_schema=False)
 async def workspace():
+    index = web_dir / "index.html"
+    if not index.is_file():
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Build the frontend with npm ci and npm run build in frontend/."},
+        )
     return FileResponse(
-        web_dir / "index.html",
+        index,
         headers={
             "Content-Security-Policy": (
                 "default-src 'self'; object-src 'none'; base-uri 'none'; "
