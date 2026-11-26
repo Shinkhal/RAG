@@ -1,6 +1,6 @@
-# RAG Microservice
+# RAG Workspace
 
-NotebookLM-style Retrieval Augmented Generation (RAG) backend built with FastAPI. Features context memory for document summarization and hybrid search optimization (BM25, query rewriting, reranking).
+A standalone document Q&A app built with FastAPI. Create an account, organize documents into notebooks, and ask questions with source excerpts and saved conversation history.
 
 ## Stack
 
@@ -8,7 +8,7 @@ NotebookLM-style Retrieval Augmented Generation (RAG) backend built with FastAPI
 - **PostgreSQL (`pgvector`)** - Vector database via SQLAlchemy async
 - **Gemini** - Embeddings and answer generation
 - **Redis (Upstash-compatible)** - Query caching, document context memory
-- **Cloudinary** - Durable source document storage
+- **Cloudinary** - Durable, authenticated storage for new document uploads
 - **BM25 + Cross-Encoder** - Hybrid search optimization
 - **Sentence-Transformers** - Reranking with ms-marco-MiniLM
 
@@ -29,16 +29,12 @@ NotebookLM-style Retrieval Augmented Generation (RAG) backend built with FastAPI
 
 ## Project Layout
 
-- `app/` application code
-  - `app/services/retrieval.py` - Hybrid search with BM25, RRF, reranking
-  - `app/services/ingestion.py` - Document processing with context caching
-- `db/` SQL migration notes and migration files
-- `tests/` unit/integration tests (120+ tests passing)
-- `ops/` operational notes and infra config
+- `backend/` FastAPI, retrieval, document ingestion, database migrations, and tests.
+- `frontend/` Sign-in, sign-up, and notebook workspace in HTML, CSS, and JavaScript. FastAPI serves this folder on the same origin as the API.
 
 ## Quick Start
 
-1. Create and activate virtualenv.
+1. From the repository root, run `cd backend`, then create and activate a virtualenv.
 2. Install dependencies:
 
 ```bash
@@ -62,7 +58,7 @@ ENABLE_PARENT_CONTEXT=false    # Parent document context
 PARENT_CONTEXT_WINDOW=2        # Chunks before/after each result
 ```
 
-5. Run API:
+5. Start the app:
 
 ```bash
 uvicorn app.main:app --reload
@@ -74,12 +70,6 @@ run schema changes. Ingestion jobs are stored in PostgreSQL and source uploads
 are persisted to Cloudinary before the API returns `202`; all replicas can poll
 the same leased job queue.
 
-This service trusts `user_id` supplied by the main application backend. Keep it
-on a private network and restrict ingress to that backend. The main backend
-must authorize admin persona routes before proxying them. Browser CORS is off
-by default; set `CORS_ALLOWED_ORIGINS` to a comma-separated allowlist only if
-direct browser access is intentionally required.
-
 Uploads are bounded by `MAX_UPLOAD_SIZE_MB` (default 10 MB), with PDFs additionally
 bounded by `MAX_PDF_SIZE_MB`. PDF metadata reports pages with no extractable text;
 enable OCR to index scanned pages.
@@ -89,6 +79,8 @@ worker image; OCR’d and still-unreadable page numbers are included in document
 metadata.
 When changing `EMBEDDING_MODEL`, reindex existing documents; vector search filters
 out documents embedded with a different model until they are reindexed.
+
+Open [RAG Workspace](http://127.0.0.1:8000/workspace) to create an account, start a notebook, and upload a PDF, TXT, Markdown, or CSV file. FastAPI serves the UI and API on the same port.
 
 Health check:
 
@@ -103,11 +95,10 @@ Core variables are listed in `.env.example`, including:
 - `DATABASE_URL` (use the exact PostgreSQL connection string for your database)
 - `GEMINI_API_KEY`
 - `REDIS_URL` and `REDIS_TOKEN` (Redis protocol)
-- `REDIS_REST_URL` and `REDIS_REST_TOKEN` (Upstash REST fallback)
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` (optional Upstash REST alternative)
+- `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET`
 - `UPSTASH_VECTOR_REST_URL`, `UPSTASH_VECTOR_REST_TOKEN` (optional; not active in retrieval yet)
-- `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
 - `MAX_UPLOAD_SIZE_MB`, `MAX_UPLOADS_PER_HOUR`, `INGEST_WORKER_LEASE_MINUTES`
-- `CORS_ALLOWED_ORIGINS` (optional, comma-separated browser origin allowlist)
 - `INGEST_WORKER_POLL_INTERVAL_SECONDS` (default `1`)
 
 ### Feature Flags
@@ -122,7 +113,16 @@ Core variables are listed in `.env.example`, including:
 
 ## API Endpoints
 
-Base prefix: `/api/v1/rag`
+Account routes use the `/api/v1/auth` prefix.
+
+- `POST /signup` and `POST /login` accept email and password and set a session cookie.
+- `GET /me` returns the signed-in account.
+- `POST /logout` ends the current session.
+
+Notebook, ingestion, and query routes use the `/api/v1/rag` prefix and derive ownership from the session cookie. Clients must send `X-RAG-Request: 1` on authenticated writes and on signup, login, and logout. Enable `APP_ENV=production` behind HTTPS for a secure session cookie.
+
+Existing notebooks keep their original owner IDs. New accounts receive new IDs, so assigning existing notebooks to a new account requires an explicit data migration. Cloudinary files uploaded before this change retain their original delivery type.
+
 
 ### Ingestion & Document Management
 - `POST /ingest` - Upload and process documents
@@ -148,6 +148,8 @@ Base prefix: `/api/v1/rag`
 - `GET /sessions` - List user sessions
 - `GET /sessions/{session_id}` - Get session details
 - `DELETE /sessions/{session_id}` - Delete session
+- `GET /sessions/{session_id}/documents` - List the notebook’s sources and their processing status
+- `GET /sessions/{session_id}/history` - Return the most recent 100 completed Q&A turns
 
 ## Makefile Commands
 
@@ -162,16 +164,8 @@ If you use `make`, available targets include:
 - `make typecheck` - Run mypy type checker
 - `make check` - Run lint + typecheck
 
-## Test Results
-
-- ✅ **120+ unit tests passing**
-- ✅ **Ruff linting** - 0 errors
-- ✅ **Hybrid search** - Vector + BM25 + RRF
-- ✅ **Context memory** - Document summarization support
-
 ## Notes
 
-- Production-ready with robust retrieval optimizations
 - Document context automatically cached in Redis during ingestion
 - All feature flags default to sensible values for production use
 - On startup the app connects to Postgres, applies schema migrations, and reports database state through `/health`
