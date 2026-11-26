@@ -30,7 +30,7 @@ A standalone document Q&A app built with FastAPI. Create an account, organize do
 ## Project Layout
 
 - `backend/` FastAPI, retrieval, document ingestion, database migrations, and tests.
-- `frontend/` Sign-in, sign-up, and notebook workspace in HTML, CSS, and JavaScript. FastAPI serves this folder on the same origin as the API.
+- `frontend/` React and TypeScript workspace built with Vite. FastAPI serves the production build on the same origin as the API.
 
 ## Quick Start
 
@@ -80,7 +80,17 @@ metadata.
 When changing `EMBEDDING_MODEL`, reindex existing documents; vector search filters
 out documents embedded with a different model until they are reindexed.
 
-Open [RAG Workspace](http://127.0.0.1:8000/workspace) to create an account, start a notebook, and upload a PDF, TXT, Markdown, or CSV file. FastAPI serves the UI and API on the same port.
+6. In a second terminal, run the React frontend from the repository root with Node.js 20.19+ or 22.12+.
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Open [the development workspace](http://localhost:5173/workspace). Vite proxies `/api` to FastAPI at `http://127.0.0.1:8000`. For a different backend address, set `RAG_API_TARGET` in `frontend/.env.local` and restart Vite.
+
+For a single-port setup, run `npm ci` and `npm run build` from `frontend/`, then start FastAPI from `backend/`. FastAPI serves `frontend/dist/` at [http://127.0.0.1:8000/workspace](http://127.0.0.1:8000/workspace). Include the built frontend alongside the backend in your deployment.
 
 Health check:
 
