@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A private document workspace for reading, asking questions, and checking sources.">
+  <title>RAG Workspace</title>
+  <link rel="stylesheet" href="/assets/workspace.css">
+  <script type="module" src="/assets/workspace.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/workspace"><span class="mark" aria-hidden="true">▤</span> RAG Workspace</a>
+    <div id="account" class="account" hidden><span id="email"></span><button id="logout" class="secondary">Sign out</button></div>
+  </header>
+  <p id="boot" class="boot" role="status">Loading workspace…</p>
+  <main id="auth" class="auth-layout" hidden>
+    <section class="intro">
+      <p class="kicker">DOCUMENT WORKSPACE</p>
+      <h1>Get answers from your documents.</h1>
+      <p>Bring your PDFs and notes together, ask questions, and see the excerpts behind each sourced answer.</p>
+      <div class="example">
+        <span class="kicker">EXAMPLE QUESTION</span>
+        <p>What are the main findings in this report?</p>
+      </div>
+    </section>
+    <section class="auth-card" aria-labelledby="auth-heading">
+      <h2 id="auth-heading"></h2>
+      <form id="auth-form">
+        <label for="auth-email">Email address</label>
+        <input id="auth-email" name="email" type="email" autocomplete="email" required maxlength="254" placeholder="you@example.com">
+        <label for="auth-password">Password</label>
+        <input id="auth-password" name="password" type="password" maxlength="128" required aria-describedby="password-hint">
+        <small id="password-hint" hidden>Use at least 15 characters.</small>
+        <p id="auth-error" class="error" role="alert" hidden></p>
+        <button id="auth-submit" type="submit"></button>
+      </form>
+      <p class="auth-switch"><span id="auth-prompt"></span> <a id="auth-link"></a></p>
+    </section>
+  </main>
+  <main id="workspace" class="workspace" hidden>
+    <aside class="sidebar" aria-label="Notebooks">
+      <div class="section-title"><h2>Notebooks</h2><button id="new-notebook" class="secondary" aria-label="New notebook">+ New</button></div>
+      <nav id="notebooks" aria-label="Your notebooks"></nav>
+    </aside>
+    <section class="conversation" aria-labelledby="notebook-title">
+      <div class="conversation-head"><span class="kicker">NOTEBOOK</span><h1 id="notebook-title">Your workspace</h1></div>
+      <p id="workspace-error" class="error banner" role="alert" hidden></p>
+      <div id="messages" class="messages" aria-live="polite"></div>
+      <form id="question-form" class="composer" hidden>
+        <label for="question">Ask a question</label>
+        <div class="question-row">
+          <textarea id="question" name="question" rows="2" maxlength="8000" required placeholder="What would you like to know?"></textarea>
+          <button id="send" type="submit">Ask</button>
+        </div>
+        <small id="composer-hint">Upload a source to start asking questions.</small>
+      </form>
+    </section>
+    <aside id="sources-panel" class="sources-panel" aria-labelledby="sources-title" hidden>
+      <div class="section-title"><h2 id="sources-title">Sources</h2><span id="source-count" class="count"></span></div>
+      <label class="upload" for="upload"><strong>+ Upload a document</strong><small>PDF, TXT, Markdown, CSV</small></label>
+      <input id="upload" class="visually-hidden" type="file" accept=".pdf,.txt,.md,.csv">
+      <p id="upload-status" class="muted" role="status"></p>
+      <ul id="documents" class="documents"></ul>
+    </aside>
+  </main>
+  <dialog id="notebook-dialog">
+    <form id="notebook-form">
+      <h2>New notebook</h2>
+      <label for="notebook-name">Notebook name</label>
+      <input id="notebook-name" name="title" required maxlength="120" placeholder="e.g. Research notes">
+      <p id="notebook-error" class="error" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" id="cancel-notebook" class="secondary">Cancel</button><button type="submit">Create notebook</button></div>
+    </form>
+  </dialog>
+</body>
+</html>
