@@ -50,6 +50,19 @@ def test_normalize_if_needed_skips_for_3072() -> None:
     assert client._normalize_if_needed(values) == values
 
 
+def test_rate_limit_delay_honors_suggested_retry() -> None:
+    delay = GeminiClient._rate_limit_delay(
+        RuntimeError("Quota exceeded ... Please retry in 12.5s."), attempt=0
+    )
+    assert delay == 13.5
+
+
+def test_rate_limit_delay_uses_exponential_backoff_without_hint() -> None:
+    assert GeminiClient._rate_limit_delay(RuntimeError("429"), attempt=0) == 10.0
+    assert GeminiClient._rate_limit_delay(RuntimeError("429"), attempt=3) == 80.0
+    assert GeminiClient._rate_limit_delay(RuntimeError("429"), attempt=10) == 120.0
+
+
 @pytest.mark.asyncio
 async def test_embed_documents_retries_one_by_one_on_short_batch_response() -> None:
     client = GeminiClient.__new__(GeminiClient)
@@ -71,5 +84,35 @@ async def test_embed_documents_retries_one_by_one_on_short_batch_response() -> N
     result = await client.embed_documents(["a", "b", "c"], batch_size=32)
 
     assert len(result) == 3
-    assert calls[0] == ["a", "b", "c"]
+    assert isinstance(calls[0], list)
     assert calls[1:] == ["a", "b", "c"]
+
+
+@pytest.mark.asyncio
+async def test_embed_batch_sends_each_document_as_separate_content() -> None:
+    from google.genai import types
+
+    client = GeminiClient.__new__(GeminiClient)
+    client._embedding_model = "gemini-embedding-2"
+    client._embedding_output_dimensionality = 3072
+
+    calls: list[object] = []
+
+    async def fake_embed_content(*, model, contents, config):
+        calls.append(contents)
+        return SimpleNamespace(
+            embeddings=[SimpleNamespace(values=[1.0, 2.0]) for _ in contents]
+        )
+
+    client.client = SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(embed_content=fake_embed_content))
+    )
+
+    result = await client.embed_documents(["alpha", "beta", "gamma"])
+
+    assert len(result) == 3
+    assert len(calls) == 1
+    batch = calls[0]
+    assert isinstance(batch, list)
+    assert all(isinstance(item, types.Content) for item in batch)
+    assert [item.parts[0].text for item in batch] == ["alpha", "beta", "gamma"]

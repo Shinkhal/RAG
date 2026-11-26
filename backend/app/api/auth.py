@@ -3,7 +3,6 @@ import re
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
-
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -48,6 +47,16 @@ class AccountResponse(BaseModel):
 
 class ForgotPasswordRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254)
+
+
+class ProfileUpdateRequest(BaseModel):
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=1, max_length=128)
 
 
 class ResetPasswordRequest(BaseModel):
@@ -207,6 +216,48 @@ async def login(
 async def me(response: Response, account: Account = Depends(current_account)) -> AccountResponse:
     response.headers["Cache-Control"] = "no-store"
     return _to_account_response(account)
+
+
+@router.patch("/profile", dependencies=[Depends(protect_mutation)])
+async def update_profile(
+    data: ProfileUpdateRequest,
+    account: Account = Depends(current_account),
+    db: AsyncSession = Depends(get_session),
+) -> AccountResponse:
+    first_name = data.first_name.strip()
+    last_name = data.last_name.strip()
+    if not first_name or not last_name:
+        raise HTTPException(422, "Enter your first and last name")
+
+    account.first_name = first_name
+    account.last_name = last_name
+    await db.commit()
+    return _to_account_response(account)
+
+
+@router.post("/change-password", dependencies=[Depends(protect_mutation)])
+async def change_password(
+    data: PasswordChangeRequest,
+    request: Request,
+    response: Response,
+    account: Account = Depends(current_account),
+    db: AsyncSession = Depends(get_session),
+) -> AccountResponse:
+    valid = await run_in_threadpool(
+        _verify_password, data.current_password, account.password_hash
+    )
+    if not valid:
+        raise HTTPException(400, "Your current password is incorrect")
+    if len(data.new_password) < 8:
+        raise HTTPException(422, "Use at least 8 characters for your password")
+    if data.current_password == data.new_password:
+        raise HTTPException(422, "Choose a password different from your current one")
+
+    account.password_hash = await run_in_threadpool(_hash_password, data.new_password)
+    # Sign out every other device, then re-issue the current session.
+    await db.execute(delete(LoginSession).where(LoginSession.account_id == account.id))
+    await db.commit()
+    return await _start_session(db, account, request, response)
 
 
 @router.post("/logout", status_code=204, dependencies=[Depends(protect_mutation)])

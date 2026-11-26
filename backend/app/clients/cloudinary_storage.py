@@ -129,22 +129,38 @@ class CloudinaryStorageClient:
         response = await asyncio.to_thread(_destroy)
         return response.get("result") in {"ok", "not found"}
 
-    async def download_document(self, metadata: dict[str, Any], max_bytes: int) -> bytes:
-        """Download an already-persisted upload for a retryable ingestion job."""
-        storage = extract_storage_metadata(metadata) or metadata
-        url = storage.get("secure_url")
-        if storage.get("type") in {"authenticated", "private"}:
-            from cloudinary.utils import private_download_url
+    def _asset_type(self, storage: dict[str, Any]) -> str:
+        asset_type = storage.get("type")
+        if asset_type:
+            return str(asset_type)
+        # Older metadata records may omit ``type``; infer it from the delivery
+        # URL so authenticated assets still get a signed download URL.
+        secure_url = storage.get("secure_url") or ""
+        if "/authenticated/" in secure_url:
+            return "authenticated"
+        if "/private/" in secure_url:
+            return "private"
+        return "upload"
 
-            _ensure_cloudinary_config()
-            url = private_download_url(
-                storage["public_id"],
-                storage.get("format") or "",
-                resource_type=storage.get("resource_type", "raw"),
-                type=storage["type"],
-            )
-        if not url:
-            raise ValueError("Stored upload is missing its download URL")
+    def _private_download_url(
+        self, storage: dict[str, Any], asset_type: str, *, attachment: bool = False
+    ) -> str | None:
+        public_id = storage.get("public_id")
+        if not public_id:
+            return None
+
+        from cloudinary.utils import private_download_url
+
+        _ensure_cloudinary_config()
+        return private_download_url(
+            public_id,
+            storage.get("format") or "",
+            resource_type=storage.get("resource_type", "raw"),
+            type=asset_type,
+            attachment=attachment,
+        )
+
+    async def _download_once(self, url: str, max_bytes: int) -> bytes:
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
             async with client.stream("GET", url, follow_redirects=True) as response:
                 response.raise_for_status()
@@ -159,6 +175,53 @@ class CloudinaryStorageClient:
                         raise ValueError("Stored upload exceeds the configured size limit")
                     chunks.append(chunk)
         return b"".join(chunks)
+
+    async def download_document(self, metadata: dict[str, Any], max_bytes: int) -> bytes:
+        """Download an already-persisted upload for a retryable ingestion job.
+
+        Authenticated/private assets must be fetched through a signed download
+        URL. The signed URL returned at upload time can be rejected (401) by
+        Cloudinary, so fall back to freshly signed URLs and finally the stored
+        ``secure_url`` before giving up.
+        """
+        storage = extract_storage_metadata(metadata) or metadata
+        asset_type = self._asset_type(storage)
+
+        candidates: list[str] = []
+        if asset_type in {"authenticated", "private"}:
+            for attachment in (False, True):
+                url = self._private_download_url(
+                    storage, asset_type, attachment=attachment
+                )
+                if url and url not in candidates:
+                    candidates.append(url)
+        secure_url = storage.get("secure_url")
+        if secure_url and secure_url not in candidates:
+            candidates.append(secure_url)
+
+        if not candidates:
+            raise ValueError("Stored upload is missing its download URL")
+
+        last_error: Exception | None = None
+        for index, url in enumerate(candidates):
+            try:
+                return await self._download_once(url, max_bytes)
+            except ValueError:
+                # Size-limit violations are terminal; retrying cannot help.
+                raise
+            except httpx.HTTPStatusError as exc:
+                last_error = exc
+                status = exc.response.status_code
+                if status not in {401, 403, 404, 429} and status < 500:
+                    raise
+                if index < len(candidates) - 1:
+                    await asyncio.sleep(0.5)
+            except httpx.HTTPError as exc:
+                last_error = exc
+                if index < len(candidates) - 1:
+                    await asyncio.sleep(0.5)
+
+        raise ValueError("Could not download the stored upload from Cloudinary") from last_error
 
 
 cloudinary_storage_client = CloudinaryStorageClient()

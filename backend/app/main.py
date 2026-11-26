@@ -39,11 +39,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.warning("Redis health check failed during startup")
 
         await init_db()
-        await ensure_default_personas()
+        app.state.db_ready = True
+
+        # Persona seeding is optional; a failure here must not prevent the
+        # ingestion worker from starting, or uploads would queue forever.
+        try:
+            await ensure_default_personas()
+        except Exception:
+            logger.exception("Failed to seed default personas; continuing startup")
 
         worker_task = asyncio.create_task(consume_ingest_jobs())
-
-        app.state.db_ready = True
 
     except Exception as exc:
         app.state.db_ready = False
@@ -55,6 +60,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             get_settings().app_env,
             exc,
         )
+        # Start the worker even when initialization was incomplete. If the
+        # database recovers, queued uploads will be processed instead of being
+        # stranded in the queue with no worker watching them.
+        worker_task = asyncio.create_task(consume_ingest_jobs())
 
     try:
         yield
@@ -74,7 +83,16 @@ app = FastAPI(
     middleware=[
         Middleware(
             RateLimitMiddleware,
-            exclude_paths=["/", "/health", "/workspace", "/login", "/signup"],
+            exclude_paths=[
+                "/",
+                "/health",
+                "/workspace",
+                "/profile",
+                "/login",
+                "/signup",
+                "/forgot-password",
+                "/reset-password",
+            ],
         ),
         Middleware(RequestLoggingMiddleware),
     ],
@@ -131,6 +149,9 @@ app.mount(
 @app.get("/login", include_in_schema=False)
 @app.get("/signup", include_in_schema=False)
 @app.get("/workspace", include_in_schema=False)
+@app.get("/profile", include_in_schema=False)
+@app.get("/forgot-password", include_in_schema=False)
+@app.get("/reset-password", include_in_schema=False)
 async def workspace():
     index = web_dir / "index.html"
     if not index.is_file():

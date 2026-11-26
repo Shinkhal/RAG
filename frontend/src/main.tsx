@@ -7,11 +7,13 @@ import { AuthPage } from "./pages/AuthPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
+import { ProfilePage } from "./pages/ProfilePage";
 import { api, ApiError, errorMessage, type Account } from "./api";
 import "./styles/global.css";
 import "./styles/workspace.css";
+import "./styles/profile.css";
 
-type View = "loading" | "landing" | "auth" | "forgot" | "reset" | "workspace";
+type View = "loading" | "landing" | "auth" | "forgot" | "reset" | "workspace" | "profile";
 
 function App() {
   const [account, setAccount] = useState<Account | null | undefined>();
@@ -66,12 +68,12 @@ function App() {
       return () => controller.abort();
     }
 
-    if (path === "/workspace") {
+    if (path === "/workspace" || path === "/profile") {
       api
         .account(controller.signal)
         .then((acc) => {
           setAccount(acc);
-          setView("workspace");
+          setView(path === "/profile" ? "profile" : "workspace");
         })
         .catch((err) => {
           if (controller.signal.aborted) return;
@@ -79,7 +81,7 @@ function App() {
             location.replace("/login");
           } else {
             setError(errorMessage(err));
-            setView("workspace");
+            setView(path === "/profile" ? "profile" : "workspace");
           }
         });
       return () => controller.abort();
@@ -128,6 +130,7 @@ function App() {
         </div>
       )}
       {view === "workspace" && account && <WorkspacePage />}
+      {view === "profile" && account && <ProfilePage account={account} onAccountUpdate={setAccount} />}
     </>
   );
 }

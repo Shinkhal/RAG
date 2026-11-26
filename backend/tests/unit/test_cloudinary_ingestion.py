@@ -225,8 +225,8 @@ async def test_cloudinary_download_document_uses_private_download_url(
     monkeypatch.setattr(
         cloudinary_utils,
         "private_download_url",
-        lambda public_id, fmt, resource_type="raw", type="authenticated": (
-            f"https://api.cloudinary.com/v1_1/demo/{resource_type}/download?public_id={public_id}&type={type}"
+        lambda public_id, fmt, resource_type="raw", type="authenticated", attachment=False: (
+            f"https://api.cloudinary.com/v1_1/demo/{resource_type}/download?public_id={public_id}&type={type}&attachment={attachment}"
         ),
     )
 
@@ -277,3 +277,83 @@ async def test_cloudinary_download_document_uses_private_download_url(
     assert data == b"pdf-bytes"
     assert len(requested_urls) == 1
     assert requested_urls[0].startswith("https://api.cloudinary.com/v1_1/demo/raw/download")
+
+
+@pytest.mark.asyncio
+async def test_cloudinary_download_retries_signed_url_after_401(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import cloudinary.utils as cloudinary_utils
+    import httpx
+
+    requested_urls: list[str] = []
+
+    monkeypatch.setattr(storage_module, "_ensure_cloudinary_config", lambda: None)
+    monkeypatch.setattr(
+        cloudinary_utils,
+        "private_download_url",
+        lambda public_id, fmt, resource_type="raw", type="authenticated", attachment=False: (
+            f"https://api.cloudinary.com/v1_1/demo/{resource_type}/download?public_id={public_id}&attachment={attachment}"
+        ),
+    )
+
+    async def fake_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(storage_module.asyncio, "sleep", fake_sleep)
+
+    class FakeResponse:
+        def __init__(self, url: str, status_code: int) -> None:
+            self.url = url
+            self.status_code = status_code
+            self.headers = {"content-length": "9"}
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                request = httpx.Request("GET", self.url)
+                response = httpx.Response(self.status_code, request=request)
+                raise httpx.HTTPStatusError(
+                    f"{self.status_code} error", request=request, response=response
+                )
+
+        async def aiter_bytes(self):
+            yield b"pdf-bytes"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def stream(self, method: str, url: str, follow_redirects: bool = True):
+            requested_urls.append(url)
+            status = 401 if "attachment=False" in url else 200
+            return FakeResponse(url, status)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(storage_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    client = storage_module.CloudinaryStorageClient()
+    data = await client.download_document(
+        {
+            "provider": "cloudinary",
+            "public_id": "documents/u1/doc-1.pdf",
+            "resource_type": "raw",
+            "type": "authenticated",
+            "secure_url": "https://res.cloudinary.com/demo/raw/authenticated/doc-1.pdf",
+        },
+        max_bytes=1024,
+    )
+
+    assert data == b"pdf-bytes"
+    assert len(requested_urls) == 2
+    assert "attachment=True" in requested_urls[1]

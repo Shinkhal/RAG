@@ -52,7 +52,7 @@ class FreeTierGeminiLLM(BaseLLMClient):
                 safety_settings=self._safety_settings,
             ),
         )
-        return response.text
+        return response.text or ""
 
     async def _generate_stream(
         self,

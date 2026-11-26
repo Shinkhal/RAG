@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { CheckCircle2, CircleAlert, Clock3, FileText, LoaderCircle, UploadCloud, X } from "lucide-react";
+import { CheckCircle2, CircleAlert, Clock3, FileText, LoaderCircle, PanelRightOpen, UploadCloud, X } from "lucide-react";
 import { api, errorMessage, type SourceDocument } from "../api";
 import { Button } from "./Button";
 import { Alert } from "./Alert";
@@ -8,8 +8,8 @@ import { Alert } from "./Alert";
 type UploadItem = { id: string; file: File; state: "waiting" | "uploading" | "failed"; error?: string };
 const labels: Record<string, string> = { processed: "Ready", failed: "Processing failed", queued: "Queued", processing: "Processing" };
 
-export function SourcePanel({ notebookId, active, onDocuments }: {
-  notebookId: string; active: boolean; onDocuments: (docs: SourceDocument[]) => void;
+export function SourcePanel({ notebookId, active, collapsed, onExpand, onDocuments }: {
+  notebookId: string; active: boolean; collapsed: boolean; onExpand: () => void; onDocuments: (docs: SourceDocument[]) => void;
 }) {
   const id = useId();
   const [documents, setDocuments] = useState<SourceDocument[]>([]);
@@ -88,7 +88,12 @@ export function SourcePanel({ notebookId, active, onDocuments }: {
     },
   });
 
-  return <aside className="sources-panel" aria-labelledby={`${id}-title`}>
+  return <aside className={`sources-panel ${collapsed ? "is-collapsed" : ""}`} aria-labelledby={`${id}-title`} hidden={!active}>
+    {collapsed ? <div className="pane-rail">
+      <button type="button" className="icon-button" onClick={onExpand} aria-label="Show sources panel" title="Show sources">
+        <PanelRightOpen size={17} aria-hidden="true" />
+      </button>
+    </div> : <>
     <div className="section-title"><div><span className="kicker">KNOWLEDGE BASE</span><h2 id={`${id}-title`}>Sources <span className="count">{documents.length}</span></h2></div><FileText size={19} aria-hidden="true" /></div>
     <p className="panel-description">Add the documents you want to explore.</p>
     <div {...getRootProps({ className: `dropzone ${isDragActive ? "is-dragging" : ""} ${isDragReject ? "is-rejected" : ""} ${uploading ? "is-disabled" : ""}`, "aria-label": "Upload documents", "aria-describedby": `${id}-formats` })}>
@@ -124,5 +129,6 @@ export function SourcePanel({ notebookId, active, onDocuments }: {
     </ul>
     {!loading && !error && documents.length === 0 && uploads.length === 0 && <div className="source-empty"><FileText size={26} aria-hidden="true" /><strong>No sources yet</strong><p>Upload your first document to start a conversation grounded in your content.</p></div>}
     <p className="source-footer"><CheckCircle2 size={14} aria-hidden="true" /> Ready sources are available in this notebook.</p>
+    </>}
   </aside>;
 }

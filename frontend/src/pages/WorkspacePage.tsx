@@ -1,15 +1,47 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { ArrowUp, BookOpen, Check, Copy, MessageSquare, Sparkles } from "lucide-react";
+import { ArrowUp, BookOpen, Check, Copy, MessageSquare, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Sparkles } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, errorMessage, type Answer, type Notebook, type SourceDocument, type Turn } from "../api";
+import { api, errorMessage, type Answer, type Notebook, type Persona, type PersonaSelection, type SourceDocument, type Turn } from "../api";
 import { Button } from "../components/Button";
 import { EmptyState } from "../components/EmptyState";
 import { Alert } from "../components/Alert";
 import { SourcePanel } from "../components/SourcePanel";
+import { PersonaSelector } from "../components/PersonaSelector";
 
 const nameOf = (notebook: Notebook) => notebook.title || "Untitled notebook";
 const suggestions = ["Summarize the key takeaways", "What are the main themes?", "Which details should I pay attention to?"];
+const LEFT_PANE_KEY = "rag.workspace.leftCollapsed";
+const RIGHT_PANE_KEY = "rag.workspace.rightCollapsed";
+
+function readFlag(key: string) {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeFlag(key: string, value: boolean) {
+  try {
+    localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    // Storage can be unavailable in private or embedded contexts.
+  }
+}
+
+function PaneControls({ leftCollapsed, rightCollapsed, onToggleLeft, onToggleRight }: {
+  leftCollapsed: boolean; rightCollapsed: boolean; onToggleLeft: () => void; onToggleRight: () => void;
+}) {
+  return <div className="pane-controls">
+    <button type="button" className="icon-button" onClick={onToggleLeft} aria-label={leftCollapsed ? "Show notebooks sidebar" : "Hide notebooks sidebar"} title={leftCollapsed ? "Show notebooks" : "Hide notebooks"}>
+      {leftCollapsed ? <PanelLeftOpen size={17} aria-hidden="true" /> : <PanelLeftClose size={17} aria-hidden="true" />}
+    </button>
+    <button type="button" className="icon-button" onClick={onToggleRight} aria-label={rightCollapsed ? "Show sources sidebar" : "Hide sources sidebar"} title={rightCollapsed ? "Show sources" : "Hide sources"}>
+      {rightCollapsed ? <PanelRightOpen size={17} aria-hidden="true" /> : <PanelRightClose size={17} aria-hidden="true" />}
+    </button>
+  </div>;
+}
 
 function ConversationTurn({ question, response }: { question: string; response?: Answer }) {
   const [copied, setCopied] = useState(false);
@@ -35,7 +67,15 @@ function ConversationTurn({ question, response }: { question: string; response?:
   </article>;
 }
 
-function NotebookPanel({ notebook, active }: { notebook: Notebook; active: boolean }) {
+function NotebookPanel({ notebook, active, personas, leftCollapsed, rightCollapsed, onToggleLeft, onToggleRight }: {
+  notebook: Notebook;
+  active: boolean;
+  personas: Persona[];
+  leftCollapsed: boolean;
+  rightCollapsed: boolean;
+  onToggleLeft: () => void;
+  onToggleRight: () => void;
+}) {
   const id = useId();
   const [documents, setDocuments] = useState<SourceDocument[]>([]);
   const [turns, setTurns] = useState<Turn[]>();
@@ -44,6 +84,7 @@ function NotebookPanel({ notebook, active }: { notebook: Notebook; active: boole
   const [historyError, setHistoryError] = useState("");
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [actionError, setActionError] = useState("");
+  const [persona, setPersona] = useState<PersonaSelection | null>(null);
   const messages = useRef<HTMLDivElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const submitting = useRef(false);
@@ -74,7 +115,7 @@ function NotebookPanel({ notebook, active }: { notebook: Notebook; active: boole
     setQuestion("");
     setActionError("");
     try {
-      const response = await api.ask(notebook.id, text);
+      const response = await api.ask(notebook.id, text, persona);
       setTurns(prev => [...(prev ?? []), { question: text, response }]);
     } catch (err) {
       setQuestion(draft => draft || text);
@@ -84,8 +125,18 @@ function NotebookPanel({ notebook, active }: { notebook: Notebook; active: boole
 
   return <div className="notebook-panel" hidden={!active}>
     <section className="conversation" aria-labelledby={`${id}-title`}>
-      <header className="conversation-head"><div><span className="kicker">YOUR NOTEBOOK</span><h1 id={`${id}-title`}>{nameOf(notebook)}</h1></div><span className={`chat-availability ${ready ? "is-ready" : ""}`}><span />{ready ? `${readyCount} source${readyCount === 1 ? "" : "s"} ready` : "Waiting for sources"}</span></header>
-      <div className="chat-section-label"><MessageSquare size={15} aria-hidden="true" /> Chat <span>Answers from your documents</span></div>
+      <header className="conversation-head">
+        <div className="conversation-head__main">
+          <span className="kicker">YOUR NOTEBOOK</span>
+          <h1 id={`${id}-title`}>{nameOf(notebook)}</h1>
+          <p className="conversation-head__subtitle">{ready ? "Grounded answers with citations from your sources." : "Add a source to unlock grounded answers."}</p>
+        </div>
+        <div className="conversation-head__actions">
+          <span className={`chat-availability ${ready ? "is-ready" : ""}`}><span />{ready ? `${readyCount} source${readyCount === 1 ? "" : "s"} ready` : "Waiting for sources"}</span>
+          <PersonaSelector personas={personas} value={persona} onChange={setPersona} />
+          <PaneControls leftCollapsed={leftCollapsed} rightCollapsed={rightCollapsed} onToggleLeft={onToggleLeft} onToggleRight={onToggleRight} />
+        </div>
+      </header>
       {actionError && <Alert className="banner">{actionError}</Alert>}
       <div className="messages" ref={messages} role="log" aria-label="Conversation" aria-live="polite" aria-busy={!!pendingQuestion} onScroll={() => { const el = messages.current; if (el) nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100; }}>
         {historyError && <Alert>{historyError} <Button size="sm" variant="secondary" onClick={() => setHistoryRefresh(v => v + 1)}>Retry history</Button></Alert>}
@@ -96,11 +147,14 @@ function NotebookPanel({ notebook, active }: { notebook: Notebook; active: boole
       </div>
       <form className="composer" onSubmit={ask}>
         <label className="visually-hidden" htmlFor={`${id}-question`}>Ask a question</label>
-        <div className="question-row"><textarea ref={textarea} id={`${id}-question`} rows={2} maxLength={8000} required value={question} onChange={event => setQuestion(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={ready ? "Ask anything about your sources…" : "Add a source to start asking questions…"} aria-describedby={`${id}-hint`} /><Button className="send-button" type="submit" aria-label={pendingQuestion ? "Waiting for answer" : "Send question"} disabled={!turns || !ready || !!pendingQuestion || !question.trim()}><ArrowUp size={20} aria-hidden="true" /></Button></div>
+        <div className="question-row">
+          <textarea ref={textarea} id={`${id}-question`} rows={2} maxLength={8000} required value={question} onChange={event => setQuestion(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={ready ? "Ask anything about your sources…" : "Add a source to start asking questions…"} aria-describedby={`${id}-hint`} />
+          <Button className="send-button" type="submit" aria-label={pendingQuestion ? "Waiting for answer" : "Send question"} disabled={!turns || !ready || !!pendingQuestion || !question.trim()}><ArrowUp size={20} aria-hidden="true" /></Button>
+        </div>
         <div className="composer-meta"><small id={`${id}-hint`}>{ready ? "Check citations to verify important details." : "Sources become available when processing finishes."}</small><small className="keyboard-hint">Enter to send · Shift + Enter for a new line</small></div>
       </form>
     </section>
-    <SourcePanel notebookId={notebook.id} active={active} onDocuments={setDocuments} />
+    <SourcePanel notebookId={notebook.id} active={active} collapsed={rightCollapsed} onExpand={onToggleRight} onDocuments={setDocuments} />
   </div>;
 }
 
@@ -193,15 +247,35 @@ function CreateNotebookDialog({
 
 export function WorkspacePage() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
+  const [personas, setPersonas] = useState<Persona[]>([]);
   const [selected, setSelected] = useState<string>();
   const [opened, setOpened] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [leftCollapsed, setLeftCollapsed] = useState(() => readFlag(LEFT_PANE_KEY));
+  const [rightCollapsed, setRightCollapsed] = useState(() => readFlag(RIGHT_PANE_KEY));
 
   function select(id: string) {
     setOpened((ids) => (ids.includes(id) ? ids : [...ids, id]));
     setSelected(id);
   }
+
+  useEffect(() => writeFlag(LEFT_PANE_KEY, leftCollapsed), [leftCollapsed]);
+  useEffect(() => writeFlag(RIGHT_PANE_KEY, rightCollapsed), [rightCollapsed]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api
+      .personas(controller.signal)
+      .then((list) => {
+        if (!controller.signal.aborted) setPersonas(list.filter((persona) => persona.is_active));
+      })
+      .catch(() => {
+        // Personas are optional; the workspace still works without them.
+        if (!controller.signal.aborted) setPersonas([]);
+      });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -220,34 +294,47 @@ export function WorkspacePage() {
     return () => controller.abort();
   }, []);
 
+  const toggleLeft = () => setLeftCollapsed((value) => !value);
+  const toggleRight = () => setRightCollapsed((value) => !value);
+
   return (
-    <main className="workspace">
-      <aside className="sidebar" aria-label="Notebooks">
-        <div className="section-title">
-          <h2>Notebooks <span className="count">{notebooks.length}</span></h2>
-          {!loading && (
-            <CreateNotebookDialog
-              onCreate={(notebook) => {
-                setNotebooks((list) => [notebook, ...list]);
-                select(notebook.id);
-              }}
-            />
-          )}
-        </div>
-        <nav id="notebooks" aria-label="Your notebooks">
-          {notebooks.map((notebook) => (
-            <button
-              className="notebook"
-              key={notebook.id}
-              aria-current={
-                notebook.id === selected ? true : undefined
-              }
-              onClick={() => select(notebook.id)}
-            >
-              <BookOpen size={17} aria-hidden="true" /><span>{nameOf(notebook)}</span>
+    <main className={`workspace ${leftCollapsed ? "is-left-collapsed" : ""} ${rightCollapsed ? "is-right-collapsed" : ""}`}>
+      <aside className={`sidebar ${leftCollapsed ? "is-collapsed" : ""}`} aria-label="Notebooks">
+        {leftCollapsed ? (
+          <div className="pane-rail">
+            <button type="button" className="icon-button" onClick={toggleLeft} aria-label="Show notebooks sidebar" title="Show notebooks">
+              <PanelLeftOpen size={17} aria-hidden="true" />
             </button>
-          ))}
-        </nav>
+          </div>
+        ) : (
+          <>
+            <div className="section-title">
+              <h2>Notebooks <span className="count">{notebooks.length}</span></h2>
+              {!loading && (
+                <CreateNotebookDialog
+                  onCreate={(notebook) => {
+                    setNotebooks((list) => [notebook, ...list]);
+                    select(notebook.id);
+                  }}
+                />
+              )}
+            </div>
+            <nav id="notebooks" aria-label="Your notebooks">
+              {notebooks.map((notebook) => (
+                <button
+                  className="notebook"
+                  key={notebook.id}
+                  aria-current={
+                    notebook.id === selected ? true : undefined
+                  }
+                  onClick={() => select(notebook.id)}
+                >
+                  <BookOpen size={17} aria-hidden="true" /><span>{nameOf(notebook)}</span>
+                </button>
+              ))}
+            </nav>
+          </>
+        )}
       </aside>
       {notebooks
         .filter(({ id }) => opened.includes(id))
@@ -256,13 +343,25 @@ export function WorkspacePage() {
             key={notebook.id}
             notebook={notebook}
             active={selected === notebook.id}
+            personas={personas}
+            leftCollapsed={leftCollapsed}
+            rightCollapsed={rightCollapsed}
+            onToggleLeft={toggleLeft}
+            onToggleRight={toggleRight}
           />
         ))}
       {!selected && (
         <section className="conversation">
-          <div className="conversation-head">
-            <h1>Your workspace</h1>
-          </div>
+          <header className="conversation-head">
+            <div className="conversation-head__main">
+              <span className="kicker">WORKSPACE</span>
+              <h1>Your workspace</h1>
+              <p className="conversation-head__subtitle">Notebooks keep your sources and questions together.</p>
+            </div>
+            <div className="conversation-head__actions">
+              <PaneControls leftCollapsed={leftCollapsed} rightCollapsed={rightCollapsed} onToggleLeft={toggleLeft} onToggleRight={toggleRight} />
+            </div>
+          </header>
           {error && <Alert className="banner">{error}</Alert>}
           {loading && <EmptyState title="Loading notebooks…" />}
           {!loading && !error && (

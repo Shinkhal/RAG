@@ -176,6 +176,14 @@ class TestIsInformativeText:
     def test_accepts_text_with_letters(self) -> None:
         assert is_informative_text("●●●Landour Trip") is True
 
+    def test_accepts_non_latin_scripts(self) -> None:
+        assert is_informative_text("यह एक हिंदी दस्तावेज़ है") is True
+        assert is_informative_text("这是一个中文文档") is True
+        assert is_informative_text("هذه وثيقة عربية") is True
+
+    def test_rejects_whitespace_only(self) -> None:
+        assert is_informative_text("   \n\t  ") is False
+
 
 # ── extract_text_from_plain ───────────────────────────────────────
 

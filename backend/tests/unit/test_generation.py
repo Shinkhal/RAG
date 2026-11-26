@@ -6,10 +6,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.llms.prompts import _build_context, _render_style_rules, build_grounded_prompts
-from app.llms.router import LLMTierConfig, get_llm_config
+from app.llms.router import get_llm_config
 from app.schemas.query import ExternalSearchResult
 from app.services.generation import generate_answer
-
 
 # ── _render_style_rules ───────────────────────────────────────────
 
@@ -225,9 +224,32 @@ class TestGetLlmConfig:
     def test_free_tier_defaults(self) -> None:
         config = get_llm_config("free")
         assert config.tier == "free"
-        assert config.provider == "gemini"
+        assert config.provider in {"groq", "gemini"}
         assert config.queries_per_day == 50
         assert config.max_tokens == 2000
+
+    def test_free_tier_prefers_groq_when_key_is_configured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FREE_TIER_PROVIDER", "groq")
+        monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+        monkeypatch.delenv("GROQ_MODEL", raising=False)
+
+        config = get_llm_config("free")
+
+        assert config.provider == "groq"
+        assert config.generation_model == "openai/gpt-oss-120b"
+
+    def test_free_tier_falls_back_to_gemini_without_groq_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FREE_TIER_PROVIDER", "groq")
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+        config = get_llm_config("free")
+
+        assert config.provider == "gemini"
+        assert config.generation_model.startswith("gemini-")
 
     def test_pro_tier(self) -> None:
         config = get_llm_config("pro")
@@ -244,7 +266,7 @@ class TestGetLlmConfig:
     def test_unknown_tier_falls_back_to_free(self) -> None:
         config = get_llm_config("unknown_tier")
         assert config.tier == "free"
-        assert config.provider == "gemini"
+        assert config.provider in {"groq", "gemini"}
 
     def test_case_insensitive(self) -> None:
         config = get_llm_config("PRO")

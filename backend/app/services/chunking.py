@@ -191,10 +191,12 @@ def clean_pdf_text(text: str) -> str:
 
 
 def is_informative_text(text: str) -> bool:
-    stripped = text.strip()
-    if not stripped:
-        return False
-    return bool(re.search(r"[A-Za-z0-9]", stripped))
+    """Return True when text contains at least one letter or digit.
+
+    ``str.isalnum`` is Unicode-aware, so documents written in non-Latin
+    scripts (Hindi, Arabic, CJK, ...) are not discarded during ingestion.
+    """
+    return any(character.isalnum() for character in text)
 
 
 def batched(items: list[str], size: int | None = None) -> Iterator[list[str]]:

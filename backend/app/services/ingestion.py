@@ -17,6 +17,7 @@ from app.services.chunking import (
     normalize_document_text,
     sliding_window_chunks,
 )
+from app.utils.logger import logger
 
 
 @dataclass(slots=True)
@@ -183,7 +184,15 @@ async def process_ingest_job(
             "created_at": datetime.now(UTC).isoformat(),
         }
 
-        await redis_cache.set_document_context(document_id, context)
+        # Context memory only powers summaries; it must never fail an ingestion
+        # that has already persisted its chunks. Summaries fall back to reading
+        # the chunks directly when this cache is unavailable.
+        try:
+            await redis_cache.set_document_context(document_id, context)
+        except Exception:
+            logger.warning(
+                "Failed to cache document context for %s", document_id, exc_info=True
+            )
     except Exception:
         if created_storage:
             with suppress(Exception):

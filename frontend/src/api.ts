@@ -33,6 +33,22 @@ export interface Turn {
   response: Answer;
 }
 
+export interface Persona {
+  persona_id: string;
+  name: string;
+  description: string | null;
+  style_config: Record<string, unknown>;
+  intensity: number;
+  sample_responses: Record<string, unknown>[] | null;
+  is_active: boolean;
+  is_system: boolean;
+}
+
+export interface PersonaSelection {
+  persona_id: string;
+  intensity: number;
+}
+
 const auth = "/api/v1/auth";
 const rag = "/api/v1/rag";
 
@@ -43,7 +59,7 @@ export class ApiError extends Error {
 }
 
 interface Options {
-  method?: "POST";
+  method?: "GET" | "POST" | "PATCH";
   data?: object;
   body?: FormData;
   signal?: AbortSignal;
@@ -100,6 +116,11 @@ export const api = {
       data: { token, password },
     }),
   logout: () => request<void>(`${auth}/logout`, { method: "POST" }),
+  updateProfile: (data: { first_name: string; last_name: string }) =>
+    request<Account>(`${auth}/profile`, { method: "PATCH", data }),
+  changePassword: (data: { current_password: string; new_password: string }) =>
+    request<Account>(`${auth}/change-password`, { method: "POST", data }),
+  personas: (signal: AbortSignal) => request<Persona[]>(`${rag}/personas`, { signal }),
   notebooks: (signal: AbortSignal) => request<Notebook[]>(`${rag}/sessions`, { signal }),
   createNotebook: (title: string) =>
     request<Notebook>(`${rag}/sessions`, { method: "POST", data: { title } }),
@@ -116,8 +137,11 @@ export const api = {
     body.set("file", file);
     return request<{ document_id: string; job_id: string | null; status: string }>(`${rag}/ingest`, { method: "POST", body });
   },
-  ask: (sessionId: string, question: string) =>
-    request<Answer>(`${rag}/query`, { method: "POST", data: { session_id: sessionId, query: question } }),
+  ask: (sessionId: string, question: string, persona?: PersonaSelection | null) =>
+    request<Answer>(`${rag}/query`, {
+      method: "POST",
+      data: { session_id: sessionId, query: question, ...(persona ? { persona } : {}) },
+    }),
 };
 
 export function errorMessage(error: unknown) {

@@ -7,10 +7,15 @@ async function mockWorkspace(page: Page, initial: Doc[] = []) {
   let uploadFailures = 0;
   let queryFailures = 0;
   let queries = 0;
+  let lastQuery: { persona?: { persona_id: string; intensity: number } } | undefined;
   await page.route("**/api/**", async route => {
     const path = new URL(route.request().url()).pathname;
     let body: unknown;
-    if (path.endsWith("/auth/me")) body = { id: "user", first_name: "Alex", last_name: "Morgan", email: "alex@example.com" };
+    if (path.endsWith("/auth/me")) body = { id: "user", first_name: "Alex", last_name: "Morgan", email: "alex@example.com", created_at: "2025-01-15T00:00:00Z" };
+    else if (path.endsWith("/personas")) body = [
+      { persona_id: "concise", name: "Concise", description: "Short, direct answers.", style_config: { system_prompt: "Be concise." }, intensity: 0.6, sample_responses: null, is_active: true, is_system: true },
+      { persona_id: "teacher", name: "Teacher", description: "Explains step by step.", style_config: { system_prompt: "Teach carefully." }, intensity: 0.8, sample_responses: null, is_active: true, is_system: true },
+    ];
     else if (path.endsWith("/sessions")) body = [{ id: "research", title: "Product research" }, { id: "notes", title: "Meeting notes" }];
     else if (path.endsWith("/history")) body = [];
     else if (path.endsWith("/documents")) body = path.includes("/research/") ? docs : [];
@@ -24,6 +29,7 @@ async function mockWorkspace(page: Page, initial: Doc[] = []) {
     else if (path.includes("/documents/")) body = { status: "failed", error: "No readable text was found in this file.", chunks_created: 0 };
     else if (path.endsWith("/query")) {
       queries++;
+      lastQuery = JSON.parse(route.request().postData() || "{}");
       if (queryFailures-- > 0) return route.fulfill({ status: 503, json: { detail: "Please try your question again." } });
       await new Promise(resolve => setTimeout(resolve, 150));
       body = { answer: "## Key findings\n\nResearch suggests **three priorities**:\n\n- Clear navigation\n- Useful feedback\n- Accessible controls", sources: [{ doc_id: "ready", doc_name: "Research notes.pdf", page: 3, excerpt: "Participants preferred clear feedback and simple navigation." }] };
@@ -32,7 +38,7 @@ async function mockWorkspace(page: Page, initial: Doc[] = []) {
   });
   await page.goto("/workspace");
   await expect(page.getByRole("heading", { name: "Product research" })).toBeVisible();
-  return { docs, failUpload: () => { uploadFailures = 1; }, failQuery: () => { queryFailures = 1; }, queries: () => queries };
+  return { docs, failUpload: () => { uploadFailures = 1; }, failQuery: () => { queryFailures = 1; }, queries: () => queries, lastQuery: () => lastQuery };
 }
 const ready: Doc = { id: "ready", name: "Research notes.pdf", status: "processed", chunks_created: 12 };
 
@@ -95,6 +101,68 @@ test("persisted ingestion failures show backend error details", async ({ page })
   await page.getByText("View issue").click();
   await expect(page.getByText("No readable text was found in this file.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Send question" })).toBeDisabled();
+});
+
+test("a persona selected in chat is sent with the question", async ({ page }) => {
+  const state = await mockWorkspace(page, [ready]);
+  await page.getByRole("button", { name: "Persona" }).click();
+  await page.getByRole("button", { name: /^Concise/ }).click();
+  const input = page.getByRole("textbox", { name: "Ask a question" });
+  await input.fill("What matters most?");
+  await input.press("Enter");
+  await expect(page.getByRole("heading", { name: "Key findings" })).toBeVisible();
+  expect(state.lastQuery()?.persona).toEqual({ persona_id: "concise", intensity: 0.6 });
+});
+
+test("sidebars collapse, expand, and remember their state", async ({ page }) => {
+  await mockWorkspace(page, [ready]);
+
+  await page.getByRole("button", { name: "Hide notebooks sidebar" }).click();
+  await expect(page.locator(".workspace")).toHaveClass(/is-left-collapsed/);
+  await expect(page.getByRole("navigation", { name: "Your notebooks" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Show notebooks sidebar" }).first().click();
+  await expect(page.locator(".workspace")).not.toHaveClass(/is-left-collapsed/);
+
+  await page.getByRole("button", { name: "Hide sources sidebar" }).click();
+  await expect(page.locator(".workspace")).toHaveClass(/is-right-collapsed/);
+  await page.screenshot({ path: "/tmp/rag-workspace-collapsed.png", fullPage: true });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Product research" })).toBeVisible();
+  await expect(page.locator(".workspace")).toHaveClass(/is-right-collapsed/);
+  await page.getByRole("button", { name: "Show sources sidebar" }).first().click();
+  await expect(page.locator(".workspace")).not.toHaveClass(/is-right-collapsed/);
+  await expect(page.getByRole("heading", { name: "Sources" })).toBeVisible();
+});
+
+test("profile page updates the account name and password", async ({ page }) => {
+  let account = { id: "user", first_name: "Alex", last_name: "Morgan", email: "alex@example.com", created_at: "2025-01-15T00:00:00Z" };
+  await page.route("**/api/**", async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/auth/me")) return route.fulfill({ json: account });
+    if (path.endsWith("/auth/profile")) {
+      const data = JSON.parse(route.request().postData() || "{}");
+      account = { ...account, ...data };
+      return route.fulfill({ json: account });
+    }
+    if (path.endsWith("/auth/change-password")) return route.fulfill({ json: account });
+    return route.fulfill({ status: 404, json: { detail: "Not found" } });
+  });
+
+  await page.goto("/profile");
+  await expect(page.getByRole("heading", { name: "Account settings" })).toBeVisible();
+  await expect(page.getByText("Member since")).toBeVisible();
+
+  await page.getByLabel("First name").fill("Alexa");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Profile updated.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Alexa Morgan" })).toBeVisible();
+
+  await page.getByLabel("Current password").fill("oldpassword");
+  await page.getByLabel("New password", { exact: true }).fill("newpassword8");
+  await page.getByLabel("Confirm new password").fill("newpassword8");
+  await page.getByRole("button", { name: "Update password" }).click();
+  await expect(page.getByText("Password updated. Other devices have been signed out.")).toBeVisible();
+  await page.screenshot({ path: "/tmp/rag-profile.png", fullPage: true });
 });
 
 for (const width of [1440, 820, 390]) {

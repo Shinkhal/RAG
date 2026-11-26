@@ -52,16 +52,19 @@ class RedisCache:
         result = payload.get("result")
         if result is None:
             return None
+        if isinstance(result, (dict, list)):
+            return result
         return json.loads(result)
 
     async def _rest_set(self, key: str, value: dict[str, Any], ttl_seconds: int) -> None:
         if not self._http_client or not self._rest_url:
             return
-        encoded_key = quote(key, safe="")
-        encoded_value = quote(json.dumps(value), safe="")
+        # Send the value in the request body. Putting a whole document context
+        # in the URL path exceeds HTTP URL limits for anything but tiny values
+        # and raises httpx.InvalidURL ("URL too long").
         response = await self._http_client.post(
-            f"{self._rest_url}/set/{encoded_key}/{encoded_value}",
-            params={"EX": ttl_seconds},
+            self._rest_url,
+            json=["SET", key, json.dumps(value), "EX", ttl_seconds],
         )
         response.raise_for_status()
 

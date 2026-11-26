@@ -1,5 +1,6 @@
 import asyncio
 import math
+import re
 from typing import Any, AsyncIterator
 
 from google import genai
@@ -50,15 +51,37 @@ class GeminiClient:
             return self._l2_normalize(values)
         return values
 
+    @staticmethod
+    def _batch_contents(batch: list[str]) -> Any:
+        """Build request contents that yield one embedding per document.
+
+        Passing a ``list[str]`` to the Gemini SDK is interpreted as multiple
+        parts of a *single* content, so the API returns a single embedding for
+        the whole batch. Each document must be wrapped in its own ``Content``
+        to get one embedding per chunk.
+        """
+        if len(batch) == 1:
+            return batch[0]
+        return [types.Content(parts=[types.Part(text=text)]) for text in batch]
+
+    @staticmethod
+    def _rate_limit_delay(exc: Exception, attempt: int) -> float:
+        """Honor Gemini's suggested retry delay, with exponential backoff."""
+        match = re.search(r"retry in (\d+(?:\.\d+)?)\s*s", str(exc), re.IGNORECASE)
+        if match:
+            return min(float(match.group(1)) + 1.0, 120.0)
+        return min(10.0 * (2**attempt), 120.0)
+
     async def _embed_batch(
         self, batch: list[str], task_type: str
     ) -> list[list[float]]:
         result = None
-        for attempt in range(5):
+        max_attempts = 6
+        for attempt in range(max_attempts):
             try:
                 result = await self.client.aio.models.embed_content(
                     model=self._embedding_model,
-                    contents=batch if len(batch) > 1 else batch[0],
+                    contents=self._batch_contents(batch),
                     config=types.EmbedContentConfig(
                         task_type=task_type,
                         output_dimensionality=self._embedding_output_dimensionality,
@@ -66,8 +89,15 @@ class GeminiClient:
                 )
                 break
             except errors.APIError as e:
-                if e.code == 429 and attempt < 4:
-                    await asyncio.sleep(10.0)
+                if e.code == 429 and attempt < max_attempts - 1:
+                    delay = self._rate_limit_delay(e, attempt)
+                    logger.warning(
+                        "Gemini embedding rate limited; retrying in %.1fs (attempt %d/%d)",
+                        delay,
+                        attempt + 1,
+                        max_attempts,
+                    )
+                    await asyncio.sleep(delay)
                 else:
                     raise
 
@@ -122,7 +152,7 @@ class GeminiClient:
                 safety_settings=self._safety_settings,
             ),
         )
-        return response.text
+        return response.text or ""
 
     async def generate_stream(
         self,

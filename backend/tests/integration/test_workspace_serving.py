@@ -18,7 +18,7 @@ async def test_built_workspace_and_assets_share_the_api_origin(monkeypatch):
     monkeypatch.setattr(redis_cache, 'increment_rate_limit', AsyncMock(return_value=True))
     monkeypatch.setattr(redis_cache, 'get_raw', AsyncMock(return_value='1'))
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
-        for path in ['/login', '/signup', '/workspace']:
+        for path in ['/login', '/signup', '/workspace', '/profile', '/forgot-password', '/reset-password']:
             response = await client.get(path)
             assert response.status_code == 200
             assert 'text/html' in response.headers['content-type']

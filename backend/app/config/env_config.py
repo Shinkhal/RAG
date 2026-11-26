@@ -296,8 +296,30 @@ class EnvSettings:
         return number("QUERY_CACHE_TTL_SECONDS", 3600)
 
     @property
+    def free_tier_provider(self) -> str:
+        """Generation provider for the free tier ("groq" or "gemini")."""
+        return optional("FREE_TIER_PROVIDER", "groq").strip().lower()
+
+    @property
     def free_tier_model(self) -> str:
-        return optional("FREE_TIER_MODEL", "gemini-2.0-flash")
+        """Gemini model used by the free tier (and as its fallback)."""
+        return optional("FREE_TIER_MODEL", "gemini-3.5-flash-lite")
+
+    @property
+    def groq_model(self) -> str:
+        return optional("GROQ_MODEL", "openai/gpt-oss-120b")
+
+    @property
+    def groq_api_key(self) -> str:
+        return optional("GROQ_API_KEY")
+
+    @property
+    def groq_base_url(self) -> str:
+        return optional("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+
+    @property
+    def groq_reasoning_effort(self) -> str:
+        return optional("GROQ_REASONING_EFFORT").strip().lower()
 
     @property
     def pro_tier_model(self) -> str:

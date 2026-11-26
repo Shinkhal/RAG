@@ -120,9 +120,18 @@ async def run_ingest_task(
                 )
 
         finally:
-            # Always bust caches so clients see the latest state
-            await redis_cache.delete_cached_job_status(job_id)
-            await redis_cache.delete_cached_document(document_id)
+            # Always bust caches so clients see the latest state. Cache
+            # failures must not take down the ingestion worker.
+            try:
+                await redis_cache.delete_cached_job_status(job_id)
+            except Exception:
+                logger.warning("Failed to clear job status cache: job=%s", job_id, exc_info=True)
+            try:
+                await redis_cache.delete_cached_document(document_id)
+            except Exception:
+                logger.warning(
+                    "Failed to clear document cache: doc=%s", document_id, exc_info=True
+                )
 
     if retry_delay:
         import asyncio
