@@ -17,6 +17,12 @@ test("landing page shows the product illustrations and author credit", async ({ 
   await page.screenshot({ path: "/tmp/rag-landing-1440.png", fullPage: true });
   await page.locator(".landing__hero").screenshot({ path: "/tmp/rag-landing-hero.png" });
 
+  await page.setViewportSize({ width: 820, height: 1000 });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: /Get instant answers/ })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: "/tmp/rag-landing-820.png", fullPage: true });
+
   await page.setViewportSize({ width: 390, height: 900 });
   await page.reload();
   await expect(page.getByRole("heading", { name: /Get instant answers/ })).toBeVisible();

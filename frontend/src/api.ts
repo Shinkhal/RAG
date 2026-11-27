@@ -6,6 +6,50 @@ export interface Account {
   created_at?: string;
 }
 
+export interface ProfilePreferences {
+  theme: "light" | "dark" | "system";
+  email_notifications: boolean;
+  default_persona_id: string | null;
+}
+
+export interface ProfileDocument {
+  id: string;
+  name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  status: string;
+  chunks_created: number;
+  session_id: string;
+  session_title: string | null;
+  created_at: string;
+  processed_at: string | null;
+  expires_at: string;
+}
+
+export interface ProfileStats {
+  total_documents: number;
+  total_sessions: number;
+  total_chunks: number;
+  total_queries: number;
+  storage_bytes: number;
+  documents_by_status: Record<string, number>;
+}
+
+export interface Profile {
+  id: string;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  email: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  last_login_at: string | null;
+  preferences: ProfilePreferences;
+  stats: ProfileStats;
+  documents: ProfileDocument[];
+}
+
 export interface Notebook {
   id: string;
   title: string | null;
@@ -104,6 +148,9 @@ const sessionPath = (id: string) => `${rag}/sessions/${encodeURIComponent(id)}`;
 
 export const api = {
   account: (signal: AbortSignal) => request<Account>(`${auth}/me`, { signal }),
+  profile: (signal: AbortSignal) => request<Profile>(`${auth}/profile`, { signal }),
+  updatePreferences: (data: Partial<ProfilePreferences>) =>
+    request<ProfilePreferences>(`${auth}/profile/preferences`, { method: "PATCH", data }),
   authenticate: (
     mode: "login" | "signup",
     data: { email: string; password: string; first_name?: string; last_name?: string }

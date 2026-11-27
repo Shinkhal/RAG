@@ -7,6 +7,9 @@ from starlette.requests import Request
 
 from app.clients.redis_cache import redis_cache
 from app.config.env_config import get_settings
+from app.utils.logger import get_logger
+
+logger = get_logger("rate_limit")
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -30,6 +33,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             key = f"rate_limit:{ip}"
         allowed = await redis_cache.increment_rate_limit(key, limit, window)
         if not allowed:
+            logger.warning(
+                "Rate limit exceeded: %s %s",
+                request.method,
+                request.url.path,
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "client_ip": ip,
+                },
+            )
             return JSONResponse(
                 status_code=429,
                 content={"detail": f"Rate limit exceeded ({limit} req/{window}s)"},

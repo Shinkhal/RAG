@@ -26,8 +26,12 @@
   --shadow-md: 0 4px 16px rgba(23, 44, 40, .08);
   --shadow-lg: 0 8px 32px rgba(23, 44, 40, .10);
   --transition: 150ms ease;
+
 }
 
+::-webkit-scrollbar {
+  display: none;
+}
 /* ─── Reset ─── */
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -214,7 +218,7 @@ img { max-width: 100%; }
 /* ══════════════════════════════════════════════════════════
    PAGE: Landing (.landing)
    ══════════════════════════════════════════════════════════ */
-.landing { --max: 1180px; overflow-x: clip; }
+.landing { --max: 100%; overflow-x: clip; }
 
 .landing a { text-decoration: none; }
 .landing a:hover { text-decoration: none; }
@@ -857,6 +861,7 @@ dialog input:focus {
   }
   .landing__verify-visual { order: 2; width: 100%; max-width: 520px; margin: 0 auto; }
   .landing__checks { text-align: left; }
+  .landing__feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .landing__use-grid { grid-template-columns: 1fr; max-width: 560px; margin: 0 auto; }
   .landing__steps { grid-template-columns: 1fr; max-width: 520px; margin: 12px auto 0; }
   .landing__step:not(:last-child)::after { display: none; }
@@ -875,6 +880,7 @@ dialog input:focus {
 
 @media (max-width: 480px) {
   .landing__hero { padding-left: 16px; padding-right: 16px; }
+  .landing__feature-grid { grid-template-columns: minmax(0, 1fr); }
   .preview__app { grid-template-columns: 84px minmax(0, 1fr); min-height: 300px; }
   .preview__side-item { padding: 6px 5px; font-size: .56rem; }
   .preview__chat { padding: 10px; }

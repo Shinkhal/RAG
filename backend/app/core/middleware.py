@@ -1,46 +1,86 @@
 import time
-import uuid
-from typing import Awaitable, Callable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
 
-from app.utils.logger import logger
+from app.utils.logger import (
+    get_logger,
+    get_request_id,
+    reset_request_id,
+    set_request_id,
+)
+
+logger = get_logger("request")
+
+_SKIP_ACCESS_PATHS = {"/health", "/favicon.ico"}
+_SKIP_ACCESS_PREFIXES = ("/assets/",)
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        request_id = str(uuid.uuid4())
-        start_time = time.time()
+    """Attach a request ID and emit one structured access log per request."""
 
-        # Log incoming request
-        logger.info(f"Incoming request: {request.method} {request.url.path} (ID: {request_id})")
+    def __init__(self, app: ASGIApp) -> None:
+        super().__init__(app)
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        token = set_request_id(request.headers.get("X-Request-ID"))
+        request_id = get_request_id()
+        method = request.method
+        path = request.url.path
+        client_ip = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent")
+        started = time.perf_counter()
 
         try:
             response = await call_next(request)
-            process_time = (time.time() - start_time) * 1000
-
-            # Log successful response
-            logger.info(
-                f"Request completed: {request.method} {request.url.path} "
-                f"- Status: {response.status_code} "
-                f"- Duration: {process_time:.2f}ms (ID: {request_id})"
-            )
-
-            # Add process time header
-            response.headers["X-Process-Time"] = f"{process_time:.2f}ms"
-            response.headers["X-Request-ID"] = request_id
-            if request.url.path.startswith("/api/"):
-                response.headers["Cache-Control"] = "no-store"
-            return response
-
-        except Exception as e:
-            process_time = (time.time() - start_time) * 1000
-            logger.error(
-                f"Request failed: {request.method} {request.url.path} "
-                f"- Duration: {process_time:.2f}ms - Error: {str(e)} (ID: {request_id})",
-                exc_info=True,
+        except Exception:
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            logger.exception(
+                "%s %s failed after %.2fms",
+                method,
+                path,
+                duration_ms,
+                extra={
+                    "method": method,
+                    "path": path,
+                    "duration_ms": duration_ms,
+                    "client_ip": client_ip,
+                    "user_agent": user_agent,
+                },
             )
             raise
+        else:
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            if self._should_log(method, path):
+                logger.info(
+                    "%s %s -> %s in %.2fms",
+                    method,
+                    path,
+                    response.status_code,
+                    duration_ms,
+                    extra={
+                        "method": method,
+                        "path": path,
+                        "status_code": response.status_code,
+                        "duration_ms": duration_ms,
+                        "client_ip": client_ip,
+                        "user_agent": user_agent,
+                    },
+                )
+
+            response.headers["X-Process-Time"] = f"{duration_ms:.2f}ms"
+            response.headers["X-Request-ID"] = request_id
+            if path.startswith("/api/"):
+                response.headers["Cache-Control"] = "no-store"
+            return response
+        finally:
+            reset_request_id(token)
+
+    @staticmethod
+    def _should_log(method: str, path: str) -> bool:
+        if method == "OPTIONS":
+            return False
+        if path in _SKIP_ACCESS_PATHS:
+            return False
+        return not path.startswith(_SKIP_ACCESS_PREFIXES)

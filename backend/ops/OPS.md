@@ -1,5 +1,17 @@
   # Observability & Operations
 
+## Logs
+
+The service writes one line per log record to stdout and, unless `LOG_TO_FILE=false`, appends to a rotating file. File logs survive restarts and crashes; stdout is still the source of truth for container and systemd collectors.
+
+- Location: `LOG_DIR` / `LOG_FILENAME` (default `backend/logs/rag.log`).
+- Rotation: `LOG_MAX_BYTES` per file (default 10 MB) with `LOG_BACKUP_COUNT` rotated files (default 5).
+- Format: `LOG_FORMAT=json` for production aggregation, `text` for local development.
+- Correlation: every request is logged with a sanitized `X-Request-ID`, echoed in the response header and included in every record emitted during that request.
+- Access logs: one line per request (`GET /api/v1/rag/query -> 200 in 42.10ms`) with `method`, `path`, `status_code`, `duration_ms`, and `client_ip`. `/health` and static assets are skipped.
+- Uvicorn's access logger is disabled to avoid duplicate lines; uvicorn startup and error logs use the same formatter and file.
+- Multiple uvicorn workers share one file handler, which can interleave lines and race on rotation. For `--workers > 1`, prefer `LOG_TO_FILE=false` and collect stdout with your platform's log driver (or run a dedicated sidecar), keeping `LOG_FORMAT=json`.
+
 ## Metrics (Prometheus → Grafana Cloud)
 
 ### Query Performance

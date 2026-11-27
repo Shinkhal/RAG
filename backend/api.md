@@ -47,6 +47,14 @@ These endpoints are used by the frontend or other services to interact with the 
 | `/sessions/{session_id}` | `GET` | Retrieves session details and metadata. |
 | `/sessions/{session_id}` | `DELETE` | Deletes a chat session and associated metadata. |
 
+### **Profile & Account**
+| Endpoint | Method | Use Case |
+| :--- | :--- | :--- |
+| `/auth/profile` | `GET` | Returns everything the profile page needs in one request: account details, uploaded document counts, recently uploaded documents, and preferences. Supports `?limit=` (1-500, default 100) for the document list. |
+| `/auth/profile/preferences` | `PATCH` | Updates one or more profile preferences (`theme`, `email_notifications`, `default_persona_id`) without changing the rest. |
+| `/auth/me` | `GET` | Returns the signed-in account's basic identity fields. |
+| `/auth/profile` | `PATCH` | Updates the account's first and last name. |
+
 ---
 
 ## 2. External APIs Integrated

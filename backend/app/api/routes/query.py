@@ -24,8 +24,10 @@ from app.services.external_knowledge import get_external_knowledge
 from app.services.generation import generate_answer
 from app.services.personas import build_persona_prompt_config
 from app.services.retrieval import retrieve_chunks
+from app.utils.logger import get_logger
 
 router = APIRouter()
+logger = get_logger("retrieval")
 
 FALLBACK_TOPIC_THRESHOLD = 0.1
 
@@ -266,14 +268,7 @@ async def query_rag(
     low_confidence = chunks_result.low_confidence
     # If low confidence, include debug info in logs for debugging
     if low_confidence and getattr(chunks_result, "debug", None):
-        try:
-            import logging
-
-            logging.getLogger("app.retrieval").warning(
-                "Low confidence retrieval debug: %s", chunks_result.debug
-            )
-        except Exception:
-            pass
+        logger.warning("Low confidence retrieval debug: %s", chunks_result.debug)
     top_score = chunks_with_scores[0][1] if chunks_with_scores else None
     confidence = (
         chunks_with_scores[0][0].get("vector_score", top_score)

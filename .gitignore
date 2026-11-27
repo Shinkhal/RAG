@@ -15,6 +15,9 @@ env/
 # Testing
 .pytest_cache/
 
+# Logs
+logs/
+
 # Distribution / packaging
 dist/
 build/

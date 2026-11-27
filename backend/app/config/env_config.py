@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 from typing import Optional
@@ -138,23 +139,19 @@ class GetEnv:
 
     @staticmethod
     def validate():
-        print("🔍 Validating environment...")
+        logger = logging.getLogger("rag.config")
+        logger.info("Validating environment")
 
         try:
             GetEnv.database.url()
-            print("✅ Env validation passed")
+            logger.info("Environment validation passed")
         except Exception as e:
-            print("❌ Env validation failed:")
-            print(str(e))
+            logger.error("Environment validation failed: %s", e)
             sys.exit(1)
 
 
-# =====================================
-# AUTO VALIDATE (PROD)
-# =====================================
-
-if GetEnv.app.is_prod():
-    GetEnv.validate()
+# Production validation runs during app startup (after logging is configured),
+# not as an import side effect, so failures are captured in the log files.
 
 
 class EnvSettings:
@@ -368,6 +365,31 @@ class EnvSettings:
     @property
     def log_level(self) -> str:
         return optional("LOG_LEVEL", "INFO")
+
+    @property
+    def log_format(self) -> str:
+        value = optional("LOG_FORMAT", "text").strip().lower()
+        return value if value in {"text", "json"} else "text"
+
+    @property
+    def log_to_file(self) -> bool:
+        return optional("LOG_TO_FILE", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+    @property
+    def log_dir(self) -> str:
+        return optional("LOG_DIR", "logs")
+
+    @property
+    def log_filename(self) -> str:
+        return optional("LOG_FILENAME", "rag.log")
+
+    @property
+    def log_max_bytes(self) -> int:
+        return max(0, number("LOG_MAX_BYTES", 10 * 1024 * 1024))
+
+    @property
+    def log_backup_count(self) -> int:
+        return max(0, number("LOG_BACKUP_COUNT", 5))
 
     @property
     def tavily_api_key(self) -> str:

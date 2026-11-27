@@ -134,34 +134,47 @@ test("sidebars collapse, expand, and remember their state", async ({ page }) => 
   await expect(page.getByRole("heading", { name: "Sources" })).toBeVisible();
 });
 
-test("profile page updates the account name and password", async ({ page }) => {
+test("profile page updates the account name", async ({ page }) => {
   let account = { id: "user", first_name: "Alex", last_name: "Morgan", email: "alex@example.com", created_at: "2025-01-15T00:00:00Z" };
+  const profile = () => ({
+    ...account,
+    full_name: `${account.first_name} ${account.last_name}`.trim(),
+    is_active: true,
+    updated_at: "2025-01-15T00:00:00Z",
+    last_login_at: null,
+    preferences: { theme: "system", email_notifications: true, default_persona_id: null },
+    stats: { total_documents: 0, total_sessions: 0, total_chunks: 0, total_queries: 0, storage_bytes: 0, documents_by_status: {} },
+    documents: [],
+  });
   await page.route("**/api/**", async route => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/auth/me")) return route.fulfill({ json: account });
-    if (path.endsWith("/auth/profile")) {
-      const data = JSON.parse(route.request().postData() || "{}");
-      account = { ...account, ...data };
-      return route.fulfill({ json: account });
+    if (path.endsWith("/auth/profile/preferences")) {
+      return route.fulfill({ json: JSON.parse(route.request().postData() || "{}") });
     }
-    if (path.endsWith("/auth/change-password")) return route.fulfill({ json: account });
+    if (path.endsWith("/auth/profile")) {
+      if (route.request().method() === "PATCH") {
+        account = { ...account, ...JSON.parse(route.request().postData() || "{}") };
+        return route.fulfill({ json: account });
+      }
+      return route.fulfill({ json: profile() });
+    }
+    if (path.endsWith("/personas")) return route.fulfill({ json: [] });
     return route.fulfill({ status: 404, json: { detail: "Not found" } });
   });
 
   await page.goto("/profile");
-  await expect(page.getByRole("heading", { name: "Account settings" })).toBeVisible();
-  await expect(page.getByText("Member since")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your profile" })).toBeVisible();
+  await expect(page.getByText("Joined Jan 15, 2025")).toBeVisible();
 
   await page.getByLabel("First name").fill("Alexa");
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText("Profile updated.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Alexa Morgan" })).toBeVisible();
 
-  await page.getByLabel("Current password").fill("oldpassword");
-  await page.getByLabel("New password", { exact: true }).fill("newpassword8");
-  await page.getByLabel("Confirm new password").fill("newpassword8");
-  await page.getByRole("button", { name: "Update password" }).click();
-  await expect(page.getByText("Password updated. Other devices have been signed out.")).toBeVisible();
+  // Password management is no longer part of the profile page.
+  await expect(page.getByRole("heading", { name: "Password" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Update password" })).toHaveCount(0);
   await page.screenshot({ path: "/tmp/rag-profile.png", fullPage: true });
 });
 

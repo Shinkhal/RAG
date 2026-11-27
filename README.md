@@ -128,6 +128,22 @@ Core variables are listed in `.env.example`, including:
 | `ENABLE_PARENT_CONTEXT` | `false` | Fetch parent document context around retrieved chunks |
 | `PARENT_CONTEXT_WINDOW` | `2` | Number of chunks to fetch before/after each result |
 
+### Logging
+
+Logs are printed to stdout and, by default, also written to a rotating file at `backend/logs/rag.log`. Every request receives an `X-Request-ID` (reused from the incoming header when present) that is returned in the response and attached to each log line emitted while handling it.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOG_LEVEL` | `INFO` | Minimum level for application, uvicorn, and third-party loggers |
+| `LOG_FORMAT` | `text` | `text` for aligned human-readable output, `json` for one JSON object per line |
+| `LOG_TO_FILE` | `true` | Persist logs to the rotating file in addition to stdout |
+| `LOG_DIR` | `logs` | Directory for log files (relative paths resolve inside `backend/`) |
+| `LOG_FILENAME` | `rag.log` | Log file name |
+| `LOG_MAX_BYTES` | `10485760` | Rotate after this many bytes (10 MB) |
+| `LOG_BACKUP_COUNT` | `5` | Number of rotated files to keep |
+
+Use `LOG_FORMAT=json` in production so aggregators such as Loki, CloudWatch, or Datadog can index `level`, `logger`, `request_id`, `method`, `path`, `status_code`, `duration_ms`, and `client_ip` as structured fields.
+
 ## API Endpoints
 
 Account routes use the `/api/v1/auth` prefix.

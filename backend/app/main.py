@@ -12,13 +12,17 @@ from starlette.middleware import Middleware
 from app.api.router import api_router
 from app.clients.redis_cache import redis_cache
 from app.config.cloudinary_config import CloudinaryConfig
-from app.config.env_config import get_env, get_settings
+from app.config.env_config import GetEnv, get_env, get_settings
 from app.core.middleware import RequestLoggingMiddleware
 from app.db import init_db
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.services.personas import ensure_default_personas
-from app.utils.logger import logger
+from app.utils.logger import configure_logging, logger
 from app.workers.queue import consume_ingest_jobs
+
+configure_logging()
+if GetEnv.app.is_prod():
+    GetEnv.validate()
 
 
 @asynccontextmanager

@@ -1,10 +1,10 @@
-import logging
 from typing import Any
 
 from app.config.env_config import get_settings
 from app.schemas.query import ExternalSearchResult
+from app.utils.logger import get_logger
 
-logger = logging.getLogger("app.external_knowledge")
+logger = get_logger("external_knowledge")
 
 
 async def search_web(query: str, num_results: int = 5) -> list[ExternalSearchResult]:
