@@ -1,7 +1,6 @@
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Response
-from pydantic import ValidationError
 from sqlalchemy import BigInteger, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,34 +14,12 @@ from app.schemas.profile import (
     ProfileResponse,
     ProfileStats,
 )
+from app.services.preferences import current_preferences, merge_preference_update
 
 router = APIRouter()
 
 DEFAULT_DOCUMENT_LIMIT = 100
 MAX_DOCUMENT_LIMIT = 500
-
-
-def _current_preferences(account: Account) -> ProfilePreferences:
-    """Merge stored preferences over the defaults, dropping invalid values.
-
-    Values are validated one field at a time so a single bad entry (for example
-    from an older release or a manual database edit) does not reset every other
-    preference to its default.
-    """
-    defaults = ProfilePreferences()
-    stored = account.preferences if isinstance(account.preferences, dict) else {}
-    values = defaults.model_dump()
-
-    for field in ProfilePreferences.model_fields:
-        if field not in stored:
-            continue
-        try:
-            validated = ProfilePreferences.model_validate({**values, field: stored[field]})
-        except ValidationError:
-            continue
-        values[field] = getattr(validated, field)
-
-    return ProfilePreferences.model_validate(values)
 
 
 def _as_size(value: Any) -> int | None:
@@ -156,7 +133,7 @@ async def get_profile(
         created_at=account.created_at,
         updated_at=account.updated_at,
         last_login_at=account.last_login_at,
-        preferences=_current_preferences(account),
+        preferences=current_preferences(account),
         stats=stats,
         documents=documents,
     )
@@ -173,18 +150,8 @@ async def update_profile_preferences(
     db: AsyncSession = Depends(get_session),
 ) -> ProfilePreferences:
     """Update one or more profile preferences, leaving the rest unchanged."""
-    updates = data.model_dump(exclude_unset=True)
+    preferences = merge_preference_update(account, data)
 
-    # ``theme`` and ``email_notifications`` always have a value. Treat an
-    # explicit null as "leave unchanged" instead of persisting an invalid value,
-    # while still allowing ``default_persona_id`` to be cleared with null.
-    for field in ("theme", "email_notifications"):
-        if updates.get(field) is None:
-            updates.pop(field, None)
-
-    preferences = _current_preferences(account).model_dump()
-    preferences.update(updates)
-
-    account.preferences = preferences
+    account.preferences = preferences.model_dump()
     await db.commit()
-    return _current_preferences(account)
+    return preferences

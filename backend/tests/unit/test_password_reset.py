@@ -78,12 +78,12 @@ async def test_reset_password_updates_hash_and_marks_token_used():
     db.scalar.side_effect = [reset_record, account]
 
     res = await reset_password(
-        ResetPasswordRequest(token=raw_token, password="newpassword8"), db=db
+        ResetPasswordRequest(token=raw_token, password="Newpassword8!"), db=db
     )
 
     assert "reset" in res.message.lower()
     assert reset_record.used_at is not None
-    assert _verify_password("newpassword8", account.password_hash)
+    assert _verify_password("Newpassword8!", account.password_hash)
     assert not _verify_password("oldpass123", account.password_hash)
 
 
@@ -103,7 +103,7 @@ async def test_reset_password_rejects_invalid_token():
     db.scalar.return_value = None
     with pytest.raises(HTTPException) as exc:
         await reset_password(
-            ResetPasswordRequest(token="invalid-token-123456", password="validpass8"), db=db
+            ResetPasswordRequest(token="invalid-token-123456", password="Validpass8!"), db=db
         )
     assert exc.value.status_code == 400
 

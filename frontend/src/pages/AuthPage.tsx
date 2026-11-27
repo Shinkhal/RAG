@@ -4,6 +4,7 @@ import { Logo } from "../components/Logo";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Alert } from "../components/Alert";
+import { PASSWORD_POLICY_HINT, passwordPolicyError } from "../password";
 
 export function AuthPage({ signup }: { signup: boolean }) {
   const [submitting, setSubmitting] = useState(false);
@@ -26,9 +27,12 @@ export function AuthPage({ signup }: { signup: boolean }) {
       return;
     }
 
-    if (signup && password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
+    if (signup) {
+      const passwordProblem = passwordPolicyError(password);
+      if (passwordProblem) {
+        setError(passwordProblem);
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -124,7 +128,7 @@ export function AuthPage({ signup }: { signup: boolean }) {
               required
               minLength={signup ? 8 : 1}
               maxLength={128}
-              hint={signup ? "Must be at least 8 characters." : undefined}
+              hint={signup ? PASSWORD_POLICY_HINT : undefined}
             />
             {!signup && (
               <div className="auth-card__forgot">

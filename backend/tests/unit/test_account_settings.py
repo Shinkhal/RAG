@@ -89,7 +89,7 @@ async def test_change_password_rejects_wrong_current_password():
 
     with pytest.raises(HTTPException) as exc:
         await change_password(
-            PasswordChangeRequest(current_password="not-my-password", new_password="newpassword8"),
+            PasswordChangeRequest(current_password="not-my-password", new_password="Newpassword8!"),
             request=_request(),
             response=Response(),
             account=account,
@@ -120,7 +120,7 @@ async def test_change_password_updates_hash_and_rotates_session():
     db = _db()
 
     response = await change_password(
-        PasswordChangeRequest(current_password="oldpassword", new_password="newpassword8"),
+        PasswordChangeRequest(current_password="oldpassword", new_password="Newpassword8!"),
         request=_request(cookie="a" * 43),
         response=Response(),
         account=account,
@@ -128,7 +128,7 @@ async def test_change_password_updates_hash_and_rotates_session():
     )
 
     assert response.id == "acc-1"
-    assert _verify_password("newpassword8", account.password_hash)
+    assert _verify_password("Newpassword8!", account.password_hash)
     assert not _verify_password("oldpassword", account.password_hash)
     assert account.last_login_at is not None
     db.commit.assert_awaited()

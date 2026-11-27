@@ -9,9 +9,14 @@ import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { api, ApiError, errorMessage, type Account } from "./api";
+import { applyStoredTheme, syncThemeFromPreferences } from "./theme";
 import "./styles/global.css";
 import "./styles/workspace.css";
 import "./styles/profile.css";
+import "./styles/theme.css";
+
+// Apply the remembered theme before React paints the first view.
+applyStoredTheme();
 
 type View = "loading" | "landing" | "auth" | "forgot" | "reset" | "workspace" | "profile";
 
@@ -28,7 +33,8 @@ function App() {
     if (path === "/" || path === "") {
       api
         .account(controller.signal)
-        .then(() => {
+        .then((acc) => {
+          syncThemeFromPreferences(acc.preferences);
           location.replace("/workspace");
         })
         .catch(() => {
@@ -54,7 +60,8 @@ function App() {
           : "auth";
       api
         .account(controller.signal)
-        .then(() => {
+        .then((acc) => {
+          syncThemeFromPreferences(acc.preferences);
           location.replace("/workspace");
         })
         .catch((err) => {
@@ -72,6 +79,7 @@ function App() {
       api
         .account(controller.signal)
         .then((acc) => {
+          syncThemeFromPreferences(acc.preferences);
           setAccount(acc);
           setView(path === "/profile" ? "profile" : "workspace");
         })
@@ -120,7 +128,12 @@ function App() {
 
   return (
     <>
-      <Topbar account={account} signingOut={signingOut} onSignOut={signOut} />
+      <Topbar
+        account={account}
+        signingOut={signingOut}
+        onSignOut={signOut}
+        onAccountUpdate={setAccount}
+      />
       {error && <Alert className="app-banner">{error}</Alert>}
       {view === "loading" && (
         <div className="app-loading">

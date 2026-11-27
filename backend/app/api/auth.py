@@ -15,8 +15,11 @@ from starlette.concurrency import run_in_threadpool
 from app.config.env_config import get_settings
 from app.db import get_session
 from app.db.models import Account, LoginSession, PasswordResetToken
+from app.schemas.profile import ProfilePreferences
 from app.services.email import send_password_reset_email
+from app.services.preferences import current_preferences
 from app.utils.logger import logger
+from app.utils.passwords import PASSWORD_MAX_LENGTH, password_policy_error
 
 router = APIRouter()
 SESSION_AGE = timedelta(days=7)
@@ -27,14 +30,14 @@ DUMMY_HASH = f"pbkdf2_sha256${HASH_ITERATIONS}${'00' * 16}${'00' * 32}"
 
 class LoginCredentials(BaseModel):
     email: str = Field(min_length=3, max_length=254)
-    password: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=PASSWORD_MAX_LENGTH)
 
 
 class SignupCredentials(BaseModel):
     first_name: str = Field(min_length=1, max_length=100)
     last_name: str = Field(min_length=1, max_length=100)
     email: str = Field(min_length=3, max_length=254)
-    password: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=PASSWORD_MAX_LENGTH)
 
 
 class AccountResponse(BaseModel):
@@ -43,6 +46,7 @@ class AccountResponse(BaseModel):
     last_name: str
     email: str
     created_at: datetime
+    preferences: ProfilePreferences
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -55,13 +59,13 @@ class ProfileUpdateRequest(BaseModel):
 
 
 class PasswordChangeRequest(BaseModel):
-    current_password: str = Field(min_length=1, max_length=128)
-    new_password: str = Field(min_length=1, max_length=128)
+    current_password: str = Field(min_length=1, max_length=PASSWORD_MAX_LENGTH)
+    new_password: str = Field(min_length=1, max_length=PASSWORD_MAX_LENGTH)
 
 
 class ResetPasswordRequest(BaseModel):
     token: str = Field(min_length=10, max_length=256)
-    password: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=PASSWORD_MAX_LENGTH)
 
 
 class MessageResponse(BaseModel):
@@ -108,6 +112,7 @@ def _to_account_response(account: Account) -> AccountResponse:
         last_name=account.last_name,
         email=account.email,
         created_at=account.created_at,
+        preferences=current_preferences(account),
     )
 
 
@@ -178,8 +183,9 @@ async def signup(
     email = data.email.strip().lower()
     if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
         raise HTTPException(422, "Enter a valid email address")
-    if len(data.password) < 8:
-        raise HTTPException(422, "Use at least 8 characters for your password")
+    password_error = password_policy_error(data.password)
+    if password_error:
+        raise HTTPException(422, password_error)
 
     account = Account(
         id=str(uuid.uuid4()),
@@ -248,8 +254,9 @@ async def change_password(
     )
     if not valid:
         raise HTTPException(400, "Your current password is incorrect")
-    if len(data.new_password) < 8:
-        raise HTTPException(422, "Use at least 8 characters for your password")
+    password_error = password_policy_error(data.new_password)
+    if password_error:
+        raise HTTPException(422, password_error)
     if data.current_password == data.new_password:
         raise HTTPException(422, "Choose a password different from your current one")
 
@@ -325,8 +332,9 @@ async def reset_password(
     data: ResetPasswordRequest,
     db: AsyncSession = Depends(get_session),
 ) -> MessageResponse:
-    if len(data.password) < 8:
-        raise HTTPException(422, "Use at least 8 characters for your password")
+    password_error = password_policy_error(data.password)
+    if password_error:
+        raise HTTPException(422, password_error)
 
     now = datetime.now(UTC)
     reset_record = await db.scalar(

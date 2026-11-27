@@ -118,6 +118,23 @@ test("profile page shows account, uploads, and preferences without password cont
   expect(state.patched()).toMatchObject({ theme: "dark" });
 });
 
+test("theme preference applies immediately and survives a reload", async ({ page }) => {
+  await mockProfile(page);
+
+  await page.goto("/profile");
+  await expect(page.locator("html")).toHaveAttribute("data-theme-preference", "system");
+
+  await page.getByLabel("Theme").selectOption("dark");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+  await page.getByRole("button", { name: "Save preferences" }).click();
+  await expect(page.getByText("Preferences saved.")).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("rag-theme"))).toBe("dark");
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+});
+
 test("profile page shows an empty library state", async ({ page }) => {
   await page.route("**/api/**", async route => {
     const path = new URL(route.request().url()).pathname;

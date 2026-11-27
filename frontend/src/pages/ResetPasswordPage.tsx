@@ -4,6 +4,7 @@ import { Logo } from "../components/Logo";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Alert } from "../components/Alert";
+import { PASSWORD_POLICY_HINT, passwordPolicyError } from "../password";
 
 export function ResetPasswordPage() {
   const token = new URLSearchParams(location.search).get("token") ?? "";
@@ -21,8 +22,9 @@ export function ResetPasswordPage() {
       setError("Reset token is missing. Please request a new reset link.");
       return;
     }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
+    const passwordProblem = passwordPolicyError(password);
+    if (passwordProblem) {
+      setError(passwordProblem);
       return;
     }
     if (password !== confirm) {
@@ -51,7 +53,8 @@ export function ResetPasswordPage() {
           </a>
           <h1 className="auth-page__hero-title">Choose a new password.</h1>
           <p className="auth-page__hero-desc">
-            Use at least 8 characters to keep your workspace secure.
+            Choose a password with at least 8 characters, including uppercase
+            and lowercase letters, a number, and a special character.
           </p>
         </div>
       </div>
@@ -95,7 +98,7 @@ export function ResetPasswordPage() {
                 required
                 minLength={8}
                 maxLength={128}
-                hint="Must be at least 8 characters."
+                hint={PASSWORD_POLICY_HINT}
               />
               <Input
                 id="reset-confirm"

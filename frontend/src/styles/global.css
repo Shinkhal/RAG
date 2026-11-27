@@ -196,7 +196,16 @@ img { max-width: 100%; }
 }
 .topbar__brand { text-decoration: none; }
 .topbar__brand:hover { text-decoration: none; }
-.topbar__account { display: flex; align-items: center; gap: 14px; font-size: .88rem; }
+.topbar__account { display: flex; align-items: center; gap: 10px; font-size: .88rem; }
+.topbar__theme {
+  display: inline-grid; place-items: center; width: 34px; height: 34px;
+  padding: 0; color: var(--muted); background: var(--bg-card);
+  border: 1px solid var(--line); border-radius: 9px; cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.topbar__theme:hover:not(:disabled) { color: var(--ink); background: var(--bg-tint); }
+.topbar__theme:disabled { opacity: .55; cursor: wait; }
+.topbar__theme:focus-visible { outline: 3px solid #51977b; outline-offset: 3px; }
 .topbar__user {
   display: flex; align-items: center; gap: 9px;
   padding: 4px 7px 4px 4px; border-radius: 9px;

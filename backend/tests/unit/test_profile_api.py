@@ -7,13 +7,13 @@ import pytest
 from starlette.responses import Response
 
 from app.api.routes.profile import (
-    _current_preferences,
     _to_profile_document,
     get_profile,
     update_profile_preferences,
 )
 from app.db.models import Account, Document
 from app.schemas.profile import ProfilePreferencesUpdate
+from app.services.preferences import current_preferences
 
 
 class _Result:
@@ -82,12 +82,12 @@ def _document() -> Document:
 
 
 def test_current_preferences_falls_back_to_defaults() -> None:
-    assert _current_preferences(_account()).theme == "system"
-    assert _current_preferences(_account()).email_notifications is True
+    assert current_preferences(_account()).theme == "system"
+    assert current_preferences(_account()).email_notifications is True
 
 
 def test_current_preferences_merges_stored_values() -> None:
-    preferences = _current_preferences(
+    preferences = current_preferences(
         _account({"theme": "dark", "default_persona_id": "tutor"})
     )
 
@@ -97,13 +97,13 @@ def test_current_preferences_merges_stored_values() -> None:
 
 
 def test_current_preferences_ignores_invalid_stored_values() -> None:
-    preferences = _current_preferences(_account({"theme": "neon"}))
+    preferences = current_preferences(_account({"theme": "neon"}))
 
     assert preferences.theme == "system"
 
 
 def test_current_preferences_keeps_other_values_when_one_is_invalid() -> None:
-    preferences = _current_preferences(
+    preferences = current_preferences(
         _account({"theme": "neon", "email_notifications": False})
     )
 

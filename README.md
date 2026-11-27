@@ -149,8 +149,11 @@ Use `LOG_FORMAT=json` in production so aggregators such as Loki, CloudWatch, or 
 Account routes use the `/api/v1/auth` prefix.
 
 - `POST /signup` and `POST /login` accept email and password and set a session cookie.
-- `GET /me` returns the signed-in account.
+- Passwords must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a special character. The same policy applies to signup, password reset, and password change.
+- `GET /me` returns the signed-in account and its preferences.
 - `POST /logout` ends the current session.
+
+The profile page exposes a `theme` preference (`light`, `dark`, or `system`). The frontend applies it to the document immediately, mirrors it in `localStorage` for pre-login pages, and follows the OS colour scheme when set to `system`.
 
 Notebook, ingestion, and query routes use the `/api/v1/rag` prefix and derive ownership from the session cookie. Clients must send `X-RAG-Request: 1` on authenticated writes and on signup, login, and logout. Enable `APP_ENV=production` behind HTTPS for a secure session cookie.
 

@@ -24,6 +24,7 @@ import {
 import { Alert } from "../components/Alert";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
+import { applyTheme, storeTheme } from "../theme";
 
 const statusLabels: Record<string, string> = {
   processed: "Ready",
@@ -122,6 +123,8 @@ export function ProfilePage({ account, onAccountUpdate }: {
         setLastName(data.last_name);
         setPreferences(data.preferences);
         setSavedPreferences(data.preferences);
+        storeTheme(data.preferences.theme);
+        applyTheme(data.preferences.theme);
         setLoadError("");
       })
       .catch(err => {
@@ -140,6 +143,14 @@ export function ProfilePage({ account, onAccountUpdate }: {
     });
     return () => controller.abort();
   }, []);
+
+  // Keep the selector in sync when the theme is changed from the topbar.
+  useEffect(() => {
+    const theme = account.preferences?.theme;
+    if (!theme) return;
+    setPreferences(current => (current && current.theme !== theme ? { ...current, theme } : current));
+    setSavedPreferences(current => (current && current.theme !== theme ? { ...current, theme } : current));
+  }, [account.preferences?.theme]);
 
   const fullName = profile?.full_name || `${account.first_name} ${account.last_name}`.trim() || account.email;
   const initials = `${account.first_name.charAt(0)}${account.last_name.charAt(0)}`.toUpperCase() || account.email.charAt(0).toUpperCase();
@@ -192,9 +203,16 @@ export function ProfilePage({ account, onAccountUpdate }: {
       const updated = await api.updatePreferences(preferences);
       setPreferences(updated);
       setSavedPreferences(updated);
+      storeTheme(updated.theme);
+      applyTheme(updated.theme);
+      onAccountUpdate({ ...account, preferences: updated });
       setProfile(current => current ? { ...current, preferences: updated } : current);
       setPreferencesStatus("Preferences saved.");
     } catch (err) {
+      if (savedPreferences) {
+        setPreferences(current => current ? { ...current, theme: savedPreferences.theme } : current);
+        applyTheme(savedPreferences.theme);
+      }
       setPreferencesError(errorMessage(err));
     } finally {
       setSavingPreferences(false);
@@ -274,7 +292,11 @@ export function ProfilePage({ account, onAccountUpdate }: {
                     id={`${ids}-theme`}
                     className="profile-select"
                     value={preferences.theme}
-                    onChange={event => setPreferences({ ...preferences, theme: event.target.value as ProfilePreferences["theme"] })}
+                    onChange={event => {
+                      const theme = event.target.value as ProfilePreferences["theme"];
+                      setPreferences({ ...preferences, theme });
+                      applyTheme(theme);
+                    }}
                   >
                     <option value="system">Match system</option>
                     <option value="light">Light</option>

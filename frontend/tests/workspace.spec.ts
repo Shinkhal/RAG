@@ -114,6 +114,34 @@ test("a persona selected in chat is sent with the question", async ({ page }) =>
   expect(state.lastQuery()?.persona).toEqual({ persona_id: "concise", intensity: 0.6 });
 });
 
+test("topbar theme toggle cycles light, dark, and system", async ({ page }) => {
+  await mockWorkspace(page);
+  let preferences = {
+    theme: "system",
+    email_notifications: true,
+    default_persona_id: null,
+  };
+  await page.route("**/auth/profile/preferences", async route => {
+    preferences = { ...preferences, ...JSON.parse(route.request().postData() || "{}") };
+    return route.fulfill({ json: preferences });
+  });
+
+  const toggle = page.getByRole("button", { name: /Switch color mode/ });
+  await expect(toggle).toHaveAttribute("aria-label", /currently System/);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-label", /currently Light/);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-label", /currently Dark/);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-label", /currently System/);
+  await expect(page.locator("html")).toHaveAttribute("data-theme-preference", "system");
+});
+
 test("sidebars collapse, expand, and remember their state", async ({ page }) => {
   await mockWorkspace(page, [ready]);
 
